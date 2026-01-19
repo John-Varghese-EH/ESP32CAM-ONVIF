@@ -31,6 +31,11 @@
     #define BOARD_NAME        "AI-Thinker ESP32-CAM"
     #define HAS_PSRAM         true
     #define CHIP_TYPE         "ESP32"
+    // LED and Servo pins for AI-Thinker
+    #define FLASH_LED_PIN     4           // Flash LED (warning: conflicts with SD card D1)
+    #define STATUS_LED_PIN    33          // Blue LED on module
+    #define SERVO_PAN_PIN     12          // Pan servo (safe GPIO)
+    #define SERVO_TILT_PIN    13          // Tilt servo (safe GPIO)
 
 // ==============================================================================
 //   M5Stack Camera Models
@@ -55,6 +60,11 @@
     #define BOARD_NAME        "M5Stack Camera"
     #define HAS_PSRAM         false
     #define CHIP_TYPE         "ESP32"
+    // M5Stack Camera has no external flash LED, status LED on GPIO 14
+    #define FLASH_LED_PIN     -1          // No flash LED
+    #define STATUS_LED_PIN    14          // Red LED
+    #define SERVO_PAN_PIN     2           // Safe GPIO
+    #define SERVO_TILT_PIN    16          // Safe GPIO
 
 #elif defined(BOARD_M5STACK_PSRAM)
     #define PWDN_GPIO_NUM     -1
@@ -76,6 +86,11 @@
     #define BOARD_NAME        "M5Stack Camera PSRAM"
     #define HAS_PSRAM         true
     #define CHIP_TYPE         "ESP32"
+    // M5Stack PSRAM Camera
+    #define FLASH_LED_PIN     -1          // No flash LED
+    #define STATUS_LED_PIN    14          // Red LED
+    #define SERVO_PAN_PIN     2           // Safe GPIO
+    #define SERVO_TILT_PIN    16          // Safe GPIO
 
 #elif defined(BOARD_M5STACK_WIDE)
     #define PWDN_GPIO_NUM     -1
@@ -97,6 +112,11 @@
     #define BOARD_NAME        "M5Stack Wide Camera"
     #define HAS_PSRAM         true
     #define CHIP_TYPE         "ESP32"
+    // M5Stack Wide Camera
+    #define FLASH_LED_PIN     -1          // No flash LED
+    #define STATUS_LED_PIN    14          // Red LED
+    #define SERVO_PAN_PIN     2           // Safe GPIO
+    #define SERVO_TILT_PIN    16          // Safe GPIO
 
 #elif defined(BOARD_M5STACK_UNITCAM)
     #define PWDN_GPIO_NUM     -1
@@ -118,6 +138,11 @@
     #define BOARD_NAME        "M5Stack UnitCam"
     #define HAS_PSRAM         false
     #define CHIP_TYPE         "ESP32"
+    // M5Stack UnitCam - minimal GPIO available
+    #define FLASH_LED_PIN     -1          // No flash LED
+    #define STATUS_LED_PIN    -1          // No status LED
+    #define SERVO_PAN_PIN     -1          // No safe GPIO for servos
+    #define SERVO_TILT_PIN    -1          // No safe GPIO for servos
 
 // ==============================================================================
 //   TTGO T-Camera Models
@@ -142,6 +167,11 @@
     #define BOARD_NAME        "TTGO T-Camera"
     #define HAS_PSRAM         true
     #define CHIP_TYPE         "ESP32"
+    // TTGO T-Camera - GPIO 2 free, GPIO 33/34 input only
+    #define FLASH_LED_PIN     -1          // No dedicated flash
+    #define STATUS_LED_PIN    2           // Use GPIO 2 for status
+    #define SERVO_PAN_PIN     33          // Input-only but can use for output
+    #define SERVO_TILT_PIN    -1          // Limited GPIOs available
 
 #elif defined(BOARD_TTGO_T_JOURNAL)
     #define PWDN_GPIO_NUM      0
@@ -163,6 +193,11 @@
     #define BOARD_NAME        "TTGO T-Journal"
     #define HAS_PSRAM         true
     #define CHIP_TYPE         "ESP32"
+    // TTGO T-Journal
+    #define FLASH_LED_PIN     -1          // No flash LED
+    #define STATUS_LED_PIN    2           // GPIO 2
+    #define SERVO_PAN_PIN     12          // Safe GPIO
+    #define SERVO_TILT_PIN    13          // Safe GPIO
 
 // ==============================================================================
 //   Espressif Development Boards
@@ -187,6 +222,11 @@
     #define BOARD_NAME        "ESP-WROVER-KIT"
     #define HAS_PSRAM         true
     #define CHIP_TYPE         "ESP32"
+    // WROVER-KIT has RGB LED
+    #define FLASH_LED_PIN     -1          // No flash LED
+    #define STATUS_LED_PIN    2           // Red LED on GPIO 2
+    #define SERVO_PAN_PIN     12          // Safe GPIO
+    #define SERVO_TILT_PIN    13          // Safe GPIO
 
 #elif defined(BOARD_ESP_EYE)
     #define PWDN_GPIO_NUM     -1
@@ -208,6 +248,11 @@
     #define BOARD_NAME        "ESP-EYE"
     #define HAS_PSRAM         true
     #define CHIP_TYPE         "ESP32"
+    // ESP-EYE - LED on GPIO 22
+    #define FLASH_LED_PIN     -1          // No flash LED
+    #define STATUS_LED_PIN    22          // White LED
+    #define SERVO_PAN_PIN     2           // Safe GPIO
+    #define SERVO_TILT_PIN    15          // Safe GPIO
 
 // ==============================================================================
 //   ESP32-S3 Boards (Support H.264 Software Encoding)
@@ -233,6 +278,11 @@
     #define HAS_PSRAM         true
     #define CHIP_TYPE         "ESP32-S3"
     #define H264_CAPABLE      true    // Can use software H.264 encoder
+    // Freenove ESP32-S3 - LED on GPIO 2, flash on GPIO 48
+    #define FLASH_LED_PIN     48          // Built-in flash LED
+    #define STATUS_LED_PIN    2           // Built-in LED
+    #define SERVO_PAN_PIN     1           // Safe GPIO
+    #define SERVO_TILT_PIN    3           // Safe GPIO
 
 #elif defined(BOARD_SEEED_XIAO_S3)
     #define PWDN_GPIO_NUM     -1
@@ -255,6 +305,12 @@
     #define HAS_PSRAM         true
     #define CHIP_TYPE         "ESP32-S3"
     #define H264_CAPABLE      true
+    // XIAO ESP32S3 Sense - very limited GPIOs, LED on GPIO 21
+    // WARNING: GPIO 44/43 are console UART, avoid for servos
+    #define FLASH_LED_PIN     -1          // No flash LED
+    #define STATUS_LED_PIN    21          // Built-in orange LED
+    #define SERVO_PAN_PIN     1           // D0 - safe for PWM
+    #define SERVO_TILT_PIN    2           // D1 - safe for PWM
 
 #elif defined(BOARD_ESP32S3_EYE)
     #define PWDN_GPIO_NUM     -1
@@ -277,6 +333,11 @@
     #define HAS_PSRAM         true
     #define CHIP_TYPE         "ESP32-S3"
     #define H264_CAPABLE      true
+    // ESP32-S3-EYE
+    #define FLASH_LED_PIN     -1          // No flash LED
+    #define STATUS_LED_PIN    3           // Status LED
+    #define SERVO_PAN_PIN     1           // Safe GPIO
+    #define SERVO_TILT_PIN    2           // Safe GPIO
 
 // ==============================================================================
 //   ESP32-P4 Boards (Support H.264 Hardware Encoding!)
@@ -307,6 +368,11 @@
     #define H264_CAPABLE      true
     #define H264_HW_ENCODER   true    // Hardware H.264 encoder available!
     #define USE_MIPI_CSI      true    // Uses MIPI-CSI instead of DVP
+    // ESP32-P4 EV Board - many GPIOs available
+    #define FLASH_LED_PIN     -1          // No flash LED
+    #define STATUS_LED_PIN    27          // Use GPIO 27 for status
+    #define SERVO_PAN_PIN     26          // Safe GPIO
+    #define SERVO_TILT_PIN    25          // Safe GPIO
 
 // ==============================================================================
 //   Custom Board - Define Your Own Pins
@@ -334,6 +400,11 @@
     #define CHIP_TYPE         "ESP32" // Change to "ESP32-S3" or "ESP32-P4" if applicable
     // #define H264_CAPABLE   true    // Uncomment for S3/P4
     // #define H264_HW_ENCODER true   // Uncomment for P4 only
+    // Custom LED and Servo pins - MODIFY THESE FOR YOUR BOARD
+    #define FLASH_LED_PIN     -1          // Set to your flash LED GPIO (-1 = none)
+    #define STATUS_LED_PIN    -1          // Set to your status LED GPIO (-1 = none)
+    #define SERVO_PAN_PIN     -1          // Set to your pan servo GPIO (-1 = none)
+    #define SERVO_TILT_PIN    -1          // Set to your tilt servo GPIO (-1 = none)
 
 #else
     #error "No board selected! Please define one of the BOARD_* options in config.h"

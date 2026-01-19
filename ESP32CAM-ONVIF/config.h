@@ -101,24 +101,27 @@
 #define DEFAULT_ONVIF_ENABLED true      // Enable ONVIF service by default
 
 // --- Flash LED Settings ---
-// GPIO 4 is standard for ESP32-CAM Flash.
-// WARNING: GPIO 4 is also SD Card Data 1. If FLASH_LED_ENABLED is true, SD card MUST use 1-bit mode.
-// If you disable Flash, SD card can use 4-bit mode (faster).
-#define FLASH_LED_ENABLED true          // Set to false to enable 4-bit SD mode
-#define FLASH_LED_PIN     4
-#define FLASH_LED_INVERT false          // false = High is ON
+// WARNING: Flash LED pins are board-specific and defined in board_config.h.
+// GPIO 4 is standard for AI-Thinker ESP32-CAM but conflicts with SD Card Data 1.
+// If FLASH_LED_ENABLED is true, SD card MUST use 1-bit mode on AI-Thinker boards.
+// DISABLED BY DEFAULT to prevent pin conflicts on unsupported boards.
+#define FLASH_LED_ENABLED false         // Set to true ONLY if your board supports flash LED
+#define FLASH_LED_INVERT false          // false = High is ON (override in board_config.h if needed)
 #define DEFAULT_AUTO_FLASH false        // Auto-flash disabled by default
+// Note: FLASH_LED_PIN is defined per-board in board_config.h
 
 // --- Status LED Settings ---
-#define STATUS_LED_ENABLED true         // Set to false to disable Blue LED
-#define STATUS_LED_PIN     33           // On-board Status LED (usually GPIO 33)
-#define STATUS_LED_INVERT  true         // true = Low is ON (Standard for Blue LED)
+// WARNING: Status LED pins are board-specific and defined in board_config.h.
+// DISABLED BY DEFAULT to prevent pin conflicts on unsupported boards.
+#define STATUS_LED_ENABLED false        // Set to true ONLY if your board has a status LED
+#define STATUS_LED_INVERT  true         // true = Low is ON (override in board_config.h if needed)
+// Note: STATUS_LED_PIN is defined per-board in board_config.h
 
 // --- PTZ (Servo) Settings ---
 // Optional: Connect servos for Pan/Tilt control
+// WARNING: Servo pins are board-specific. Ensure pins don't conflict with camera/SD/reset.
 #define PTZ_ENABLED       false         // Set to true to enable servo control
-#define SERVO_PAN_PIN     12            // GPIO for Pan Servo
-#define SERVO_TILT_PIN    13            // GPIO for Tilt Servo
+// Note: SERVO_PAN_PIN and SERVO_TILT_PIN are defined per-board in board_config.h
 
 // --- Recording Settings ---
 #define ENABLE_DAILY_RECORDING  false   // If true, records continuously (loop overwrite)
