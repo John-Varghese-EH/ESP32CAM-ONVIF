@@ -1197,10 +1197,61 @@ void handle_onvif_soap() {
 }
 
 void handle_onvif_discovery() {
+  // Rate limit discovery checks to prevent tight loop
+  static unsigned long lastDiscoveryCheck = 0;
+  static unsigned long lastRecoveryAttempt = 0;
+  static int consecutiveErrors = 0;
+  static bool udpDisabled = false;
+  
+  unsigned long now = millis();
+  
+  // Only check every 50ms minimum (20 checks/second max)
+  if (now - lastDiscoveryCheck < 50) {
+    return;
+  }
+  lastDiscoveryCheck = now;
+  
+  // If we've had too many errors, back off and try to recover
+  if (udpDisabled) {
+    // Try to recover every 10 seconds
+    if (now - lastRecoveryAttempt < 10000) {
+      return;
+    }
+    lastRecoveryAttempt = now;
+    
+    // Attempt to reinitialize UDP
+    LOG_I("ONVIF Discovery: Attempting UDP recovery...");
+    onvifUDP.stop();
+    delay(100);
+    if (onvifUDP.beginMulticast(IPAddress(239,255,255,250), 3702)) {
+      LOG_I("ONVIF Discovery: UDP recovered.");
+      udpDisabled = false;
+      consecutiveErrors = 0;
+    } else {
+      LOG_E("ONVIF Discovery: UDP recovery failed, will retry later.");
+    }
+    return;
+  }
+  
   int packetSize = onvifUDP.parsePacket();
-  if (packetSize) {
+  
+  // Handle errors (parsePacket returns 0 for no packet, negative for error, positive for packet)
+  if (packetSize < 0) {
+    consecutiveErrors++;
+    if (consecutiveErrors >= 10) {
+      LOG_E("ONVIF Discovery: Too many UDP errors, disabling temporarily.");
+      udpDisabled = true;
+      lastDiscoveryCheck = now; // Reset for backoff timing
+    }
+    return;
+  }
+  
+  // Reset error counter on success
+  consecutiveErrors = 0;
+  
+  if (packetSize > 0) {
     char packet[1024];
-    int len = onvifUDP.read(packet, 1024);
+    int len = onvifUDP.read(packet, sizeof(packet) - 1);
     if(len > 0) {
         packet[len] = 0;
         // Optimization: Use strstr on buffer instead of allocating String object
@@ -1237,7 +1288,7 @@ void handle_onvif_discovery() {
       onvifUDP.endPacket();
     }
   }
-  } // End if(packetSize)
+  } // End if(packetSize > 0)
 } // End function
 
 
@@ -1245,7 +1296,11 @@ void onvif_server_start() {
   onvifServer.on("/onvif/device_service", HTTP_POST, handle_onvif_soap);
   onvifServer.on("/onvif/ptz_service", HTTP_POST, handle_onvif_soap); // Route PTZ to same handler for now
   onvifServer.begin();
-  onvifUDP.beginMulticast(IPAddress(239,255,255,250), 3702); // Fixed: use only 2 args
+  
+  // Initialize UDP for WS-Discovery with error checking
+  if (!onvifUDP.beginMulticast(IPAddress(239,255,255,250), 3702)) {
+    LOG_E("ONVIF Discovery: Failed to initialize UDP multicast!");
+  }
   LOG_I("ONVIF server started.");
 }
 
@@ -1254,3 +1309,4 @@ void onvif_server_loop() {
   onvifServer.handleClient();
   handle_onvif_discovery();
 }
+
