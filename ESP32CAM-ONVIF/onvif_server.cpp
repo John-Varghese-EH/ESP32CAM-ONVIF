@@ -142,78 +142,98 @@ String base64_encode(uint8_t *data, size_t length) {
 }
 
 // WS-UsernameToken Verification
+// Helper function to find XML element value regardless of namespace prefix
+// Handles: <wsse:Username>, <Username>, <ns1:Username>, etc.
+int findXmlElementStart(const String &xml, const String &elementName, int searchFrom) {
+    // Try with common namespace prefixes first
+    const char* prefixes[] = {"wsse:", "wsu:", "", "ns1:", "ns2:", "sec:"};
+    for (const char* prefix : prefixes) {
+        String tag = String("<") + prefix + elementName;
+        int idx = xml.indexOf(tag, searchFrom);
+        if (idx >= 0) {
+            // Find the closing > of the opening tag (handles attributes)
+            int closeTag = xml.indexOf(">", idx);
+            if (closeTag >= 0) {
+                return closeTag + 1; // Return position after >
+            }
+        }
+    }
+    return -1;
+}
+
+int findXmlElementEnd(const String &xml, const String &elementName, int searchFrom) {
+    // Try with common namespace prefixes
+    const char* prefixes[] = {"wsse:", "wsu:", "", "ns1:", "ns2:", "sec:"};
+    for (const char* prefix : prefixes) {
+        String tag = String("</") + prefix + elementName + ">";
+        int idx = xml.indexOf(tag, searchFrom);
+        if (idx >= 0) {
+            return idx;
+        }
+    }
+    return -1;
+}
+
+String extractXmlElement(const String &xml, const String &elementName, int searchFrom) {
+    int start = findXmlElementStart(xml, elementName, searchFrom);
+    if (start < 0) return "";
+    
+    int end = findXmlElementEnd(xml, elementName, start);
+    if (end < 0) return "";
+    
+    String value = xml.substring(start, end);
+    value.trim();
+    return value;
+}
+
 bool verify_soap_header(String &soapReq) {
-    // 1. Check if Security Header exists
+    // 1. Check if Security Header exists (namespace-agnostic)
     int secIdx = soapReq.indexOf("Security");
     if (secIdx < 0) {
         LOG_D("Auth: No Security header in request");
         return false;
     }
+    
+    // Debug: Log positions for troubleshooting
+    if (DEBUG_LEVEL >= 3) {
+        int usernamePos = soapReq.indexOf("Username", secIdx);
+        int passwordPos = soapReq.indexOf("Password", secIdx);
+        Serial.printf("[DEBUG] Security header at %d, Username at %d, Password at %d\n", 
+                      secIdx, usernamePos, passwordPos);
+    }
 
-    // 2. Extract Username
-    int userStart = soapReq.indexOf("<wsse:Username>", secIdx);
-    if (userStart < 0) {
+    // 2. Extract Username (handles wsse:Username, Username, etc.)
+    String username = extractXmlElement(soapReq, "Username", secIdx);
+    if (username.length() == 0) {
         LOG_E("Auth: No Username element found");
         return false;
     }
-    userStart += 15;
-    int userEnd = soapReq.indexOf("</wsse:Username>", userStart);
-    if (userEnd < 0) {
-        LOG_E("Auth: Malformed Username element");
-        return false;
-    }
-    String username = soapReq.substring(userStart, userEnd);
-    username.trim();
     
     if (username != WEB_USER) {
         LOG_E("Auth: User mismatch. Expected: '" + String(WEB_USER) + "', Got: '" + username + "'");
         return false;
     }
 
-    // 3. Extract Password (Digest)
-    int passStart = soapReq.indexOf("<wsse:Password", secIdx); 
-    if (passStart < 0) {
+    // 3. Extract Password (Digest) - handles wsse:Password, Password, etc.
+    String digestBase64 = extractXmlElement(soapReq, "Password", secIdx);
+    if (digestBase64.length() == 0) {
         LOG_E("Auth: No Password element found");
         return false;
     }
-    passStart = soapReq.indexOf(">", passStart) + 1;
-    int passEnd = soapReq.indexOf("</wsse:Password>", passStart);
-    if (passEnd < 0) {
-        LOG_E("Auth: Malformed Password element");
-        return false;
-    }
-    String digestBase64 = soapReq.substring(passStart, passEnd);
-    digestBase64.trim();
 
-    // 4. Extract Nonce
-    int nonceStart = soapReq.indexOf("<wsse:Nonce", secIdx);
-    if (nonceStart < 0) {
+    // 4. Extract Nonce - handles wsse:Nonce, Nonce, etc.
+    String nonceBase64 = extractXmlElement(soapReq, "Nonce", secIdx);
+    if (nonceBase64.length() == 0) {
         LOG_E("Auth: No Nonce element found");
         return false;
     }
-    nonceStart = soapReq.indexOf(">", nonceStart) + 1;
-    int nonceEnd = soapReq.indexOf("</wsse:Nonce>", nonceStart);
-    if (nonceEnd < 0) {
-        LOG_E("Auth: Malformed Nonce element");
-        return false;
-    }
-    String nonceBase64 = soapReq.substring(nonceStart, nonceEnd);
-    nonceBase64.trim();
 
-    // 5. Extract Created timestamp
-    int createdStart = soapReq.indexOf("<wsu:Created>", secIdx);
-    if (createdStart < 0) {
+    // 5. Extract Created timestamp - handles wsu:Created, Created, etc.
+    String created = extractXmlElement(soapReq, "Created", secIdx);
+    if (created.length() == 0) {
         LOG_E("Auth: No Created timestamp found");
         return false;
     }
-    createdStart += 13;
-    int createdEnd = soapReq.indexOf("</wsu:Created>", createdStart);
-    if (createdEnd < 0) {
-        LOG_E("Auth: Malformed Created element");
-        return false;
-    }
-    String created = soapReq.substring(createdStart, createdEnd);
-    created.trim();
     
     // Debug output for troubleshooting (only in verbose mode)
     if (DEBUG_LEVEL >= 3) {
