@@ -3,224 +3,193 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>ESP32-CAM Pro</title>
+  <title>ESP32-CAM ONVIF</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0d0d12">
-  <link rel="stylesheet" href="/style.css">
+  <meta name="theme-color" content="#000000">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-  <div id="login-overlay" class="overlay">
-    <div class="login-box">
-      <!-- <img src="/logo.png" alt="Logo" class="logo-large"> -->
-      <h2>SECURE ACCESS</h2>
-      <form id="login-form" onsubmit="return login(event)">
-        <input type="text" id="username" placeholder="Username" autocomplete="username" required>
-        <input type="password" id="password" placeholder="Password" autocomplete="current-password" required>
-        <button type="submit" class="btn">Unlock System</button>
-        <div id="login-error" class="error"></div>
-      </form>
-    </div>
-  </div>
-
   <header>
-    <div class="header-bar">
-      <!-- <img src="/logo.png" alt="Logo" class="logo-small"> -->
-      <div class="brand">ESP32-CAM PRO</div>
+    <div class="brand">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+        <circle cx="12" cy="13" r="4" />
+      </svg>
+      ESP32-CAM ONVIF <sub>Web Interface</sub>
     </div>
-    <div class="status" id="status">Connecting...</div>
+    <div class="status-pill" id="status-pill">
+      <div class="dot pulse"></div>
+      <span id="status-text">Connecting...</span>
+    </div>
   </header>
 
   <main>
-    <nav class="tabs">
-      <button class="tab-btn active" onclick="showPanel('live')">
-        <svg class="tab-icon" viewBox="0 0 24 24">
-          <path
-            d="M17,10.5V7A1,1 0 0,0 16,6H4A1,1 0 0,0 3,7V17A1,1 0 0,0 4,18H16A1,1 0 0,0 17,17V13.5L21,17.5V6.5L17,10.5Z" />
-        </svg>
-        Live
-      </button>
-      <button class="tab-btn" onclick="showPanel('camera')">
-        <svg class="tab-icon" viewBox="0 0 24 24">
-          <path
-            d="M12,10A2,2 0 0,0 10,12C10,13.11 10.9,14 12,14C13.11,14 14,13.11 14,12A2,2 0 0,0 12,10M12,16A4,4 0 0,1 8,12C8,9.79 9.79,8 12,8C14.21,8 16,9.79 16,12A4,4 0 0,1 12,16M12,3A9,9 0 0,0 3,12A9,9 0 0,0 12,21A9,9 0 0,0 21,12A9,9 0 0,0 12,3Z" />
-        </svg>
-        Settings
-      </button>
-      <button class="tab-btn" onclick="showPanel('wifi')">
-        <svg class="tab-icon" viewBox="0 0 24 24">
-          <path
-            d="M12,21L15.6,16.2C14.6,15.45 13.35,15 12,15C10.65,15 9.4,15.45 8.4,16.2L12,21M12,3C7.95,3 4.21,4.34 1.2,6.6L3,9C5.5,7.12 8.62,6 12,6C15.38,6 18.5,7.12 21,9L22.8,6.6C19.79,4.34 16.05,3 12,3M12,9C9.3,9 6.81,9.89 4.8,11.4L6.6,13.8C8.1,12.67 9.97,12 12,12C14.03,12 15.9,12.67 17.4,13.8L19.2,11.4C17.19,9.89 14.7,9 12,9Z" />
-        </svg>
-        WiFi
-      </button>
-      <button class="tab-btn" onclick="showPanel('sd')">
-        <svg class="tab-icon" viewBox="0 0 24 24">
-          <path
-            d="M6,2H12L18,8V20A2,2 0 0,1 16,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M13,3.5L16.5,7H13V3.5M6,20H16V9H12V3H6V20Z" />
-        </svg>
-        SD Card
-      </button>
-      <button class="tab-btn" onclick="showPanel('system')">
-        <svg class="tab-icon" viewBox="0 0 24 24">
-          <path
-            d="M19.14,12.94C19.14,12.78 19.14,12.61 19.14,12.45C19.14,12.29 19.14,12.12 19.14,11.96L21.41,10.19C21.61,10.03 21.67,9.75 21.54,9.5L19.38,5.78C19.26,5.55 18.97,5.45 18.74,5.55L16.06,6.62C15.5,6.18 14.9,5.84 14.25,5.56L13.85,2.7C13.81,2.45 13.6,2.27 13.34,2.27H9.03C8.77,2.27 8.56,2.45 8.52,2.7L8.12,5.56C7.47,5.84 6.87,6.18 6.31,6.62L3.63,5.55C3.39,5.45 3.11,5.55 2.98,5.78L0.83,9.5C0.7,9.75 0.75,10.03 0.96,10.19L3.23,11.96C3.23,12.12 3.23,12.29 3.23,12.45C3.23,12.61 3.23,12.78 3.23,12.94L0.96,14.71C0.75,14.87 0.7,15.15 0.83,15.39L2.98,19.13C3.11,19.36 3.39,19.46 3.63,19.36L6.31,18.29C6.87,18.73 7.47,19.07 8.12,19.35L8.52,22.21C8.56,22.46 8.77,22.64 9.03,22.64H13.34C13.6,22.64 13.81,22.46 13.85,22.21L14.25,19.35C14.9,19.07 15.5,18.73 16.06,18.29L18.74,19.36C18.97,19.46 19.26,19.36 19.38,19.13L21.54,15.39C21.67,15.15 21.61,14.87 21.41,14.71L19.14,12.94M12,15.6A3.6,3.6 0 1,1 15.6,12A3.6,3.6 0 0,1 12,15.6Z" />
-        </svg>
-        System
-      </button>
-    </nav>
+    <div class="tabs">
+      <button class="tab-btn active" onclick="setTab('dash')">Dashboard</button>
+      <button class="tab-btn" onclick="setTab('cam')">Camera</button>
+      <button class="tab-btn" onclick="setTab('net')">Network</button>
+      <button class="tab-btn" onclick="setTab('sys')">System</button>
+    </div>
 
-    <!-- LIVE PANEL -->
-    <section id="panel-live" class="panel">
-      <h2>Live Stream</h2>
-      <div class="stream-container">
-        <img id="preview" class="video-preview" src="/stream" alt="Live Stream">
-      </div>
-      <div class="control-bar">
-        <button class="btn" onclick="snapshot()">Take Snapshot</button>
-        <!-- <button class="btn" onclick="toggleRecording()">Toggle Record</button> -->
-      </div>
-    </section>
-
-    <!-- CAMERA SETTINGS PANEL -->
-    <section id="panel-camera" class="panel" style="display:none">
-      <h2>Camera Settings</h2>
-
-      <div class="setting-group">
-        <label>
-          Resolution
-          <select id="resolution" onchange="setConfig('resolution', this.value)">
-            <option value="UXGA">UXGA (1600x1200)</option>
-            <option value="SXGA">SXGA (1280x1024)</option>
-            <option value="XGA">XGA (1024x768)</option>
-            <option value="SVGA">SVGA (800x600)</option>
-            <option value="VGA" selected>VGA (640x480)</option>
-            <option value="CIF">CIF (352x288)</option>
-            <option value="QVGA">QVGA (320x240)</option>
-            <option value="QQVGA">QQVGA (160x120)</option>
-          </select>
-        </label>
-
-        <label>Quality (10-63)
-          <input type="range" min="10" max="63" step="1" value="12" onchange="setConfig('quality', this.value)">
-        </label>
-
-        <label>Brightness
-          <input type="range" min="-2" max="2" step="1" value="0" onchange="setConfig('brightness', this.value)">
-        </label>
-
-        <label>Contrast
-          <input type="range" min="-2" max="2" step="1" value="0" onchange="setConfig('contrast', this.value)">
-        </label>
-
-        <label>Saturation
-          <input type="range" min="-2" max="2" step="1" value="0" onchange="setConfig('saturation', this.value)">
-        </label>
+    <!-- PANEL: DASHBOARD -->
+    <div id="tab-dash" class="panel active">
+      <div class="video-container glass-panel" id="vcont">
+        <img id="stream" class="video-feed" src="" alt="Connecting..." crossorigin="anonymous">
+        <div id="rec-toast" class="rec-toast">Recording Started</div>
+        <div class="video-controls">
+          <button class="btn btn-icon glass-panel" onclick="toggleStream()" title="Play/Pause">⏯</button>
+          <button class="btn btn-icon glass-panel" id="btn-record" onclick="toggleRecord()" title="Record"
+            style="color:var(--danger)">🔴</button>
+          <button class="btn btn-icon glass-panel" onclick="snap()" title="Snapshot">📸</button>
+          <button class="btn btn-icon glass-panel" id="btn-flash" onclick="toggleFlash()" title="Flash">⚡</button>
+          <button class="btn btn-icon glass-panel" onclick="toggleFS()" title="Fullscreen">⛶</button>
+        </div>
       </div>
 
-      <div class="switches-grid">
-        <label><input type="checkbox" onchange="setConfig('awb', this.checked ? 1 : 0)"> Auto White Balance</label>
-        <label><input type="checkbox" onchange="setConfig('awb_gain', this.checked ? 1 : 0)"> AWB Gain</label>
-        <label><input type="checkbox" onchange="setConfig('wb_mode', this.checked ? 1 : 0)"> WB Auto Mode</label>
-        <label><input type="checkbox" onchange="setConfig('aec', this.checked ? 1 : 0)"> AEC Sensor</label>
-        <label><input type="checkbox" onchange="setConfig('aec2', this.checked ? 1 : 0)"> AEC DSP</label>
-        <label><input type="checkbox" onchange="setConfig('agc', this.checked ? 1 : 0)"> Auto Gain Control</label>
-        <label><input type="checkbox" onchange="setConfig('bpc', this.checked ? 1 : 0)"> BPC</label>
-        <label><input type="checkbox" onchange="setConfig('wpc', this.checked ? 1 : 0)"> WPC</label>
-        <label><input type="checkbox" onchange="setConfig('raw_gma', this.checked ? 1 : 0)"> Raw GMA</label>
-        <label><input type="checkbox" onchange="setConfig('lenc', this.checked ? 1 : 0)"> Lens Correction</label>
-        <label><input type="checkbox" onchange="setConfig('hmirror', this.checked ? 1 : 0)"> H-Mirror</label>
-        <label><input type="checkbox" onchange="setConfig('vflip', this.checked ? 1 : 0)"> V-Flip</label>
-        <label><input type="checkbox" onchange="setConfig('dcw', this.checked ? 1 : 0)"> DCW</label>
-      </div>
-    </section>
+      <div class="grid">
+        <div class="card glass-panel">
+          <h3>System Status</h3>
+          <div class="kv-group"><span class="label">Uptime</span> <span class="value" id="val-uptime">-</span></div>
+          <div class="kv-group"><span class="label">Heap Free</span> <span class="value" id="val-heap">-</span></div>
+          <div class="kv-group"><span class="label">WiFi Signal</span> <span class="value" id="val-rssi">-</span></div>
+          <div class="kv-group"><span class="label">Motion</span> <span class="value" id="val-motion">-</span></div>
+        </div>
 
-    <!-- WIFI PANEL -->
-    <section id="panel-wifi" class="panel" style="display:none">
-      <h2>WiFi Manager</h2>
+        <div class="card glass-panel">
+          <h3>Recording Settings</h3>
+          <div class="kv-group">
+            <span class="label">Storage Location</span>
+            <select class="form-control" style="width:auto" id="rec-mode">
+              <option value="device">Device (Client)</option>
+              <option value="sd">SD Card (Server)</option>
+            </select>
+          </div>
+          <div class="kv-group" id="sd-rec-status-row" style="display:none">
+            <span class="label">SD Status</span>
+            <span class="value" id="sd-status">Ready</span>
+          </div>
+        </div>
+      </div>
+    </div>
 
-      <div class="current-wifi">
-        <div style="margin-bottom: 1rem; color: var(--primary-color);">Current Status</div>
-        <div>Status: <span id="wifi-status" style="font-weight:bold">Unknown</span></div>
-        <div>SSID: <span id="wifi-ssid">-</span></div>
-        <div>IP: <span id="wifi-ip">-</span></div>
-      </div>
+    <!-- PANEL: CAMERA -->
+    <div id="tab-cam" class="panel">
+      <div class="grid">
+        <div class="card glass-panel">
+          <h3>Image Settings</h3>
+          <div class="input-group">
+            <span class="input-label">Resolution</span>
+            <select class="form-control" onchange="cfg('resolution', this.value)">
+              <option value="FRAMESIZE_UXGA">UXGA (1600x1200)</option>
+              <option value="FRAMESIZE_SXGA">SXGA (1280x1024)</option>
+              <option value="FRAMESIZE_HD">HD (1280x720)</option>
+              <option value="FRAMESIZE_VGA" selected>VGA (640x480) [Rec.]</option>
+              <option value="FRAMESIZE_QVGA">QVGA (320x240)</option>
+              <option value="FRAMESIZE_QQVGA">QQVGA (160x120)</option>
+            </select>
+          </div>
 
-      <div class="wifi-actions">
-        <button class="btn" onclick="scanWiFi()">Scan For Networks</button>
-        <div id="scan-status"></div>
-      </div>
+          <div class="input-group">
+            <div class="flex-row" style="margin-bottom:4px;display:flex;justify-content:space-between">
+              <span class="input-label">Quality (Lower is Better)</span>
+              <span class="value" id="lbl-qual">12</span>
+            </div>
+            <input type="range" min="4" max="63" value="12" oninput="el('lbl-qual').innerText=this.value"
+              onchange="cfg('quality', this.value)">
+          </div>
 
-      <div id="networks-list" style="display:none">
-        <h3>Available Networks</h3>
-        <table id="wifi-table">
-          <thead>
-            <tr>
-              <th>SSID</th>
-              <th>Signal</th>
-              <th>Sec</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
+          <div class="input-group">
+            <span class="input-label">Brightness</span>
+            <input type="range" min="-2" max="2" value="0" onchange="cfg('brightness', this.value)">
+          </div>
+          <div class="input-group">
+            <span class="input-label">Contrast</span>
+            <input type="range" min="-2" max="2" value="0" onchange="cfg('contrast', this.value)">
+          </div>
+        </div>
 
-      <div id="connect-form" style="display:none; margin-top:20px;">
-        <h3>Connect to Network</h3>
-        <form id="wifi-form" onsubmit="return connectWiFi(event)">
-          <input type="text" id="wifi-connect-ssid" readonly>
-          <input type="password" id="wifi-connect-password" placeholder="WiFi Password" required>
-          <button type="submit" class="btn">Connect</button>
-        </form>
-      </div>
-    </section>
+        <div class="card glass-panel">
+          <h3>Advanced</h3>
+          <div class="kv-group">
+            <span>Auto Flash (Night Mode)</span>
+            <input type="checkbox" id="chk-autoflash"
+              onchange="api('/api/autoflash', {method:'POST', body:JSON.stringify({enabled:this.checked})})">
+          </div>
+          <div class="kv-group">
+            <span>Vertical Flip</span>
+            <input type="checkbox" onchange="cfg('vflip', this.checked ? 1 : 0)">
+          </div>
+          <div class="kv-group">
+            <span>Horizontal Mirror</span>
+            <input type="checkbox" onchange="cfg('hmirror', this.checked ? 1 : 0)">
+          </div>
+          <div class="kv-group">
+            <span>Auto Exposure</span>
+            <input type="checkbox" checked onchange="cfg('aec', this.checked ? 1 : 0)">
+          </div>
+        </div>
 
-    <!-- SD CARD PANEL -->
-    <section id="panel-sd" class="panel" style="display:none">
-      <h2>SD Card Storage</h2>
-      <div class="control-bar" style="justify-content: flex-start;">
-        <button class="btn" onclick="refreshSD()">Refresh File List</button>
+        <div class="card glass-panel" style="border-left: 4px solid var(--primary)">
+          <h3>ONVIF Settings</h3>
+          <div class="kv-group">
+            <span>Enable ONVIF Service</span>
+            <input type="checkbox" id="chk-onvif" checked
+              onchange="api('/api/onvif/toggle', {method:'POST', body:JSON.stringify({enabled:this.checked})})">
+          </div>
+        </div>
       </div>
-      <div style="overflow-x:auto;">
-        <table id="sd-table">
-          <thead>
-            <tr>
-              <th>Filename</th>
-              <th>Size</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
+    </div>
 
-    <!-- SYSTEM PANEL -->
-    <section id="panel-system" class="panel" style="display:none">
-      <h2>System Status</h2>
-      <div style="line-height: 2;">
-        <div><strong>RTSP Stream:</strong> <span id="rtspUrl" class="code-font">-</span></div>
-        <div><strong>ONVIF Service:</strong> <span id="onvifUrl" class="code-font">-</span></div>
-        <div><strong>Motion Sensor:</strong> <span id="motionStatus">-</span></div>
+    <!-- PANEL: NETWORK -->
+    <div id="tab-net" class="panel">
+      <div class="card glass-panel" style="max-width: 600px; margin: 0 auto;">
+        <h3>WiFi Manager</h3>
+
+        <div style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+          <div class="kv-group"><span class="label">SSID</span> <span class="value" id="wifi-ssid">...</span></div>
+          <div class="kv-group"><span class="label">IP Address</span> <span class="value" id="wifi-ip">...</span></div>
+        </div>
+
+        <button class="btn btn-primary" style="width:100%" onclick="scanWifi()" id="btn-scan">Scan Networks</button>
+        <div id="wifi-list" style="margin-top: 1rem;"></div>
       </div>
-      <div class="control-bar" style="margin-top: 2rem;">
-        <button class="btn" onclick="reboot()"
-          style="background: linear-gradient(90deg, #ff9f43, #ee5253);">Reboot</button>
-        <button class="btn" onclick="factoryReset()"
-          style="background: linear-gradient(90deg, #b33939, #ff5252);">Factory Reset</button>
+    </div>
+
+    <!-- PANEL: SYSTEM -->
+    <div id="tab-sys" class="panel">
+      <div class="grid">
+        <div class="card glass-panel">
+          <h3>Firmware Update</h3>
+          <p class="label">Upload .bin file to update firmware</p>
+          <input type="file" id="ota-file" class="form-control" accept=".bin" style="margin-bottom: 1rem">
+          <div
+            style="height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow:hidden; margin-bottom: 1rem">
+            <div id="ota-bar" style="width:0%; height:100%; background: var(--primary); transition: width 0.2s"></div>
+          </div>
+          <button class="btn btn-primary" onclick="startOTA()">Start Update</button>
+        </div>
+
+        <div class="card glass-panel">
+          <h3>Power & Storage</h3>
+          <button class="btn" style="margin-bottom:0.5rem" onclick="window.open('/api/sd/list','_blank')">📂 Browse SD
+            Card</button>
+          <button class="btn" style="margin-bottom:0.5rem"
+            onclick="api('/api/time',{method:'POST',body:JSON.stringify({epoch:Math.floor(Date.now()/1000)})}).then(()=>alert('Synced!'))">🕒
+            Sync Time</button>
+          <button class="btn" style="color:var(--danger); border-color:rgba(239,68,68,0.3)"
+            onclick="if(confirm('Reboot device?')) api('/reboot',{method:'POST'}).then(()=>alert('Rebooting... Device will restart.'))">🔄
+            Reboot Device</button>
+        </div>
       </div>
-    </section>
+    </div>
 
   </main>
 
-  <div class="footer">
-    ESP32-CAM Pro Interface &copy; 2025 | Developed by J0X
-  </div>
-
-  <script src="/app.js"></script>
+  <script src="app.js"></script>
 </body>
 
 </html>
