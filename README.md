@@ -19,6 +19,8 @@ Transform your affordable ESP32 camera module into a **professional-grade ONVIF 
 - 🎬 **H.264 Encoding**: Hardware acceleration on ESP32-P4 (30fps @ 1080p) and software encoding on ESP32-S3
 - 🔧 **Improved Hikvision HVR Compatibility**: Fixed RTSP/SDP parameters and session handling
 - 📦 **Board-Specific Pin Configurations**: Automatic pin mapping based on board selection
+- ✅ **Unifi Protect Support**: Fixed ONVIF authentication for Ubiquiti NVRs
+- 🐛 **Stability Fixes**: Resolved memory leaks, buffer overflows, and stack corruption issues
 
 > [!NOTE]
 > **🚧 Work in Progress:**  
@@ -40,6 +42,7 @@ Transform your affordable ESP32 camera module into a **professional-grade ONVIF 
 ### 📺 NVR/DVR Compatibility
 - **Hikvision** - HVR/NVR Series (Tested: DS-7200)
 - **Dahua** - XVR/NVR Series  
+- **Ubiquiti Unifi Protect** - UDM Pro, Cloud Key Gen2+
 - **Blue Iris** - PC-based NVR
 - **Synology Surveillance Station**
 - **Any ONVIF Profile S compliant recorder**
@@ -455,6 +458,9 @@ ESP32CAM-ONVIF/
 | **H.264 not supported** | Only ESP32-P4 (HW) and ESP32-S3 (SW) support H.264 |
 | **Hikvision: "Stream type not supported"** | ESP32-CAM outputs MJPEG but Hikvision needs H.264. Use [go2rtc transcoder](#-hikvision-hvr-workaround-go2rtc-transcoder) |
 | **Hikvision: "Parameter error"** | Check ONVIF port (8000), user/pass (admin/esp123), use TCP transport |
+| **Unifi Protect: Auth failed** | Fixed in v1.1+ - update firmware |
+| **Stack smashing / random crashes** | Fixed in v1.1+ - update firmware |
+| **Bootloop on startup** | LED/PTZ pins may conflict with board. Set `FLASH_LED_ENABLED` and `STATUS_LED_ENABLED` to `false` in config.h |
 
 
 ---
