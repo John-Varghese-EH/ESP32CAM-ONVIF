@@ -387,13 +387,14 @@ void web_config_start() {
             // Check if we can write to avoid stalling on full buffer
             // (Standard Client doesn't expose availableForWrite easily on all cores, but write() is blocking with timeout)
             
-            size_t hlen = client.printf("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n", fb->len);
-            size_t wlen = client.write(fb->buf, fb->len);
+            size_t dataLen = fb->len; // Cache before releasing!
+            size_t hlen = client.printf("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n", dataLen);
+            size_t wlen = client.write(fb->buf, dataLen);
             client.print("\r\n");
             
             esp_camera_fb_return(fb); // Release immediately
             
-            if (wlen != fb->len) {
+            if (wlen != dataLen) {
                  Serial.println("[WARN] Stream write failed (Client disconnected?)");
                  break;
             }

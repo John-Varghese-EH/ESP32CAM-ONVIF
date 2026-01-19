@@ -16,11 +16,17 @@ CRtspSession::CRtspSession(SOCKET aRtspClient, CStreamer * aStreamer) : m_RtspCl
     m_TcpTransport   =  false;
     m_streaming = false;
     m_stopped = false;
+    m_ClientPtr = nullptr;  // Will be set externally if needed
 };
 
 CRtspSession::~CRtspSession()
 {
     closesocket(m_RtspClient);
+    // Memory leak fix: Delete the WiFiClient if we own it
+    if (m_ClientPtr) {
+        delete m_ClientPtr;
+        m_ClientPtr = nullptr;
+    }
 };
 
 void CRtspSession::Init()

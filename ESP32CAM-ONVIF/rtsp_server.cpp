@@ -134,6 +134,7 @@ void rtsp_server_loop() {
                 streamer->setClientSocket(clientPtr);
                 
                 session = new CRtspSession(clientPtr, streamer);
+                session->m_ClientPtr = clientPtr;  // Store pointer for cleanup
                 Serial.printf("[INFO] RTSP Client Connected (%s stream)\n", getCodecName());
                 
                 #ifdef VIDEO_CODEC_H264

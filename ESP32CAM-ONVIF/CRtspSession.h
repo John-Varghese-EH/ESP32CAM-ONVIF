@@ -64,6 +64,9 @@ private:
     bool m_TcpTransport;                                      // if Tcp based streaming was activated
     CStreamer    * m_Streamer;                                // the UDP or TCP streamer of that session
 
+public:
+    void* m_ClientPtr;                                        // Pointer to WiFiClient for memory management
+
     // parameters of the last received RTSP request
 
     RTSP_CMD_TYPES m_RtspCmdType;                             // command type (if any) of the current request
