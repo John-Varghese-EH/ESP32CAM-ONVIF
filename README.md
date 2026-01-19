@@ -479,16 +479,17 @@ Contributions are welcome! Please:
 
 ---
 
+## ⚠️ Disclaimer
+
+> **This project is currently a proof of concept for testing.**
+> 
+> Neither the ESP32CAM, nor its SDK was meant or built for proper ONVIF/RTSP support. Bugs can occur!
+
+---
+
 ## 📜 License
 
 Apache License 2.0 - See [LICENSE](LICENSE) for details.
-
-This license provides:
-- ✅ Commercial use
-- ✅ Modification
-- ✅ Distribution
-- ✅ Patent protection
-- ✅ Private use
 
 ---
 
