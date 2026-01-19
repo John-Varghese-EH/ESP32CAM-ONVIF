@@ -3,7 +3,7 @@
 **Multi-Board, Multi-Codec, Professional Network Camera Firmware**
 
 [![Platform](https://img.shields.io/badge/platform-ESP32%20|%20ESP32--S3%20|%20ESP32--P4-blue.svg)](https://www.espressif.com/en/products/socs/esp32)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-Beta-blue.svg)]()
 [![H.264](https://img.shields.io/badge/H.264-ESP32--P4%20|%20S3-orange.svg)]()
 
@@ -481,7 +481,14 @@ Contributions are welcome! Please:
 
 ## 📜 License
 
-MIT License
+Apache License 2.0 - See [LICENSE](LICENSE) for details.
+
+This license provides:
+- ✅ Commercial use
+- ✅ Modification
+- ✅ Distribution
+- ✅ Patent protection
+- ✅ Private use
 
 ---
 
