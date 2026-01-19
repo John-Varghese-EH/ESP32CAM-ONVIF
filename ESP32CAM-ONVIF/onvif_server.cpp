@@ -126,29 +126,55 @@ const char PROGMEM TPL_NET_PROTOCOLS[] =
     "</tds:GetNetworkProtocolsResponse>"
     "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
 
-// Helper to base64 decode
-int base64_decode(String input, uint8_t *output) {
-    size_t olen;
-    mbedtls_base64_decode(output, 64, &olen, (const unsigned char *)input.c_str(), input.length());
-    return olen;
+// Helper to base64 decode - FIXED: Added output buffer size parameter to prevent overflow
+int base64_decode(const String &input, uint8_t *output, size_t outputSize) {
+    size_t olen = 0;
+    int ret = mbedtls_base64_decode(output, outputSize, &olen, 
+                                     (const unsigned char *)input.c_str(), input.length());
+    if (ret != 0) {
+        return -1; // Error
+    }
+    return (int)olen;
 }
 
-// Helper to base64 encode
-String base64_encode(uint8_t *data, size_t length) {
-    unsigned char output[128];
-    size_t olen;
-    mbedtls_base64_encode(output, sizeof(output), &olen, data, length);
+// Helper to base64 encode - FIXED: Added bounds check
+String base64_encode(const uint8_t *data, size_t length) {
+    // Base64 output is ~4/3 of input, plus null terminator
+    size_t maxOutput = ((length + 2) / 3) * 4 + 1;
+    if (maxOutput > 256) maxOutput = 256; // Safety limit
+    
+    unsigned char output[256];
+    size_t olen = 0;
+    int ret = mbedtls_base64_encode(output, sizeof(output), &olen, data, length);
+    if (ret != 0) {
+        return String("");
+    }
+    output[olen] = '\0';
     return String((char *)output);
 }
 
 // WS-UsernameToken Verification
 // Helper function to find XML element value regardless of namespace prefix
 // Handles: <wsse:Username>, <Username>, <ns1:Username>, etc.
-int findXmlElementStart(const String &xml, const String &elementName, int searchFrom) {
-    // Try with common namespace prefixes first
-    const char* prefixes[] = {"wsse:", "wsu:", "", "ns1:", "ns2:", "sec:"};
-    for (const char* prefix : prefixes) {
-        String tag = String("<") + prefix + elementName;
+// FIXED: Avoid creating String objects in loops to prevent heap fragmentation
+int findXmlElementStart(const String &xml, const char* elementName, int searchFrom) {
+    // Common namespace prefixes - use static const char* to avoid dynamic allocation
+    static const char* prefixes[] = {"wsse:", "wsu:", "", "ns1:", "ns2:", "sec:"};
+    static const int prefixCount = 6;
+    
+    // Build search tag in stack buffer
+    char tag[64];
+    size_t elemLen = strlen(elementName);
+    
+    for (int i = 0; i < prefixCount; i++) {
+        size_t prefixLen = strlen(prefixes[i]);
+        if (prefixLen + elemLen + 1 >= sizeof(tag)) continue; // Skip if too long
+        
+        // Build "<prefix:element" pattern
+        tag[0] = '<';
+        strcpy(tag + 1, prefixes[i]);
+        strcpy(tag + 1 + prefixLen, elementName);
+        
         int idx = xml.indexOf(tag, searchFrom);
         if (idx >= 0) {
             // Find the closing > of the opening tag (handles attributes)
@@ -161,11 +187,24 @@ int findXmlElementStart(const String &xml, const String &elementName, int search
     return -1;
 }
 
-int findXmlElementEnd(const String &xml, const String &elementName, int searchFrom) {
-    // Try with common namespace prefixes
-    const char* prefixes[] = {"wsse:", "wsu:", "", "ns1:", "ns2:", "sec:"};
-    for (const char* prefix : prefixes) {
-        String tag = String("</") + prefix + elementName + ">";
+int findXmlElementEnd(const String &xml, const char* elementName, int searchFrom) {
+    static const char* prefixes[] = {"wsse:", "wsu:", "", "ns1:", "ns2:", "sec:"};
+    static const int prefixCount = 6;
+    
+    char tag[64];
+    size_t elemLen = strlen(elementName);
+    
+    for (int i = 0; i < prefixCount; i++) {
+        size_t prefixLen = strlen(prefixes[i]);
+        if (prefixLen + elemLen + 3 >= sizeof(tag)) continue;
+        
+        // Build "</prefix:element>" pattern
+        tag[0] = '<';
+        tag[1] = '/';
+        strcpy(tag + 2, prefixes[i]);
+        strcpy(tag + 2 + prefixLen, elementName);
+        strcat(tag, ">");
+        
         int idx = xml.indexOf(tag, searchFrom);
         if (idx >= 0) {
             return idx;
@@ -174,12 +213,12 @@ int findXmlElementEnd(const String &xml, const String &elementName, int searchFr
     return -1;
 }
 
-String extractXmlElement(const String &xml, const String &elementName, int searchFrom) {
+String extractXmlElement(const String &xml, const char* elementName, int searchFrom) {
     int start = findXmlElementStart(xml, elementName, searchFrom);
-    if (start < 0) return "";
+    if (start < 0) return String("");
     
     int end = findXmlElementEnd(xml, elementName, start);
-    if (end < 0) return "";
+    if (end < 0) return String("");
     
     String value = xml.substring(start, end);
     value.trim();
@@ -248,15 +287,22 @@ bool verify_soap_header(String &soapReq) {
     // 6. Verify Digest = Base64(SHA1(Base64Decode(Nonce) + Created + Password))
     uint8_t nonce[64];
     memset(nonce, 0, sizeof(nonce));
-    int nonceLen = base64_decode(nonceBase64, nonce);
+    int nonceLen = base64_decode(nonceBase64, nonce, sizeof(nonce));
     
     if (nonceLen <= 0) {
         LOG_E("Auth: Failed to decode nonce");
         return false;
     }
     
+    // Safety check: Ensure concatenation won't overflow buffer
+    size_t requiredSize = nonceLen + created.length() + strlen(WEB_PASS);
+    if (requiredSize > 240) { // Leave margin for safety
+        LOG_E("Auth: Buffer overflow prevented - input too large");
+        return false;
+    }
+    
     // Concatenate: nonce + created + password
-    uint8_t buffer[256];  // Increased buffer size
+    uint8_t buffer[256];
     size_t offset = 0;
     memcpy(buffer + offset, nonce, nonceLen);
     offset += nonceLen;
