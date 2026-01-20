@@ -6,7 +6,7 @@ This folder contains the **source files** for the ESP32-CAM ONVIF web interface.
 
 ⚠️ **These files are NOT directly used by the firmware!**
 
-The actual web interface is embedded in `index_html.h` as a single PROGMEM string for better performance and easier deployment.
+The actual web interface is embedded in as a single PROGMEM string for better performance and easier deployment.
 
 ## File Structure
 
