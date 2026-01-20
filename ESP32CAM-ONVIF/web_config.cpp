@@ -17,6 +17,10 @@
 #include <Update.h>
 #include <esp_task_wdt.h>
 #include "sd_recorder.h"
+#ifdef BLUETOOTH_ENABLED
+  #include "bluetooth_manager.h"
+  #include "audio_manager.h"
+#endif
 
 WebServer webConfigServer(WEB_PORT);
 
@@ -416,6 +420,58 @@ void web_config_start() {
         esp_camera_fb_return(fb);
     });
 
+    // --- Bluetooth Endpoints ---
+    #ifdef BLUETOOTH_ENABLED
+    webConfigServer.on("/api/bt/status", HTTP_GET, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        String json = "{";
+        json += "\"enabled\":" + String(appSettings.btEnabled ? "true" : "false") + ",";
+        json += "\"stealth\":" + String(appSettings.btStealthMode ? "true" : "false") + ",";
+        json += "\"mac\":\"" + appSettings.btPresenceMac + "\",";
+        json += "\"userPresent\":" + String(btManager.isUserPresent() ? "true" : "false") + ",";
+        json += "\"audioSource\":" + String(appSettings.audioSource) + ",";
+        json += "\"gain\":" + String(appSettings.btMicGain) + ",";
+        json += "\"timeout\":" + String(appSettings.btPresenceTimeout);
+        json += "}";
+        webConfigServer.send(200, "application/json", json);
+    });
+
+    webConfigServer.on("/api/bt/config", HTTP_POST, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        StaticJsonDocument<256> doc;
+        DeserializationError err = deserializeJson(doc, webConfigServer.arg("plain"));
+        if (err) {
+            webConfigServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+            return;
+        }
+        
+        if(doc.containsKey("enabled")) appSettings.btEnabled = doc["enabled"];
+        if(doc.containsKey("stealth")) appSettings.btStealthMode = doc["stealth"];
+        if(doc.containsKey("mac")) appSettings.btPresenceMac = doc["mac"].as<String>();
+        if(doc.containsKey("gain")) appSettings.btMicGain = doc["gain"];
+        if(doc.containsKey("timeout")) appSettings.btPresenceTimeout = doc["timeout"];
+        if(doc.containsKey("audioSource")) {
+             int src = doc["audioSource"];
+             appSettings.audioSource = (AudioSource)src;
+             audioManager.begin(); // Re-init audio with new source
+        }
+        
+        saveSettings();
+        
+        // If enabling BT, start it
+        if (appSettings.btEnabled) btManager.begin();
+        
+        webConfigServer.send(200, "application/json", "{\"ok\":1}");
+    });
+
+    webConfigServer.on("/api/bt/scan", HTTP_GET, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        // Trigger scan if not enabled?
+        // Return latest cache
+        webConfigServer.send(200, "application/json", btManager.getLastScanResult());
+    });
+    #endif // BLUETOOTH_ENABLED
+    
     webConfigServer.begin();
         Serial.println("[INFO] Web config server started.");
     }

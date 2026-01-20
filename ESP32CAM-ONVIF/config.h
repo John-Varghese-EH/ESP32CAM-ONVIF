@@ -1,4 +1,5 @@
 #pragma once
+#include <Arduino.h>
 
 // ==============================================================================
 //   ESP32-CAM ONVIF/RTSP/HVR Configuration
@@ -127,7 +128,34 @@
 #define ENABLE_DAILY_RECORDING  false   // If true, records continuously (loop overwrite)
 #define RECORD_SEGMENT_SEC      300     // 5 minutes per file
 #define MAX_DISK_USAGE_PCT      90      // Auto-delete oldest files if disk usage > 90%
-#define ENABLE_MOTION_DETECTION false    // Set false to disable motion detection to save CPU
+#define ENABLE_MOTION_DETECTION false   // Disabled to save IRAM (enable if not using Bluetooth)
+
+// --- Bluetooth Settings (Compile-Time) ---
+// WARNING: Bluetooth + WiFi + Camera is VERY heavy on IRAM (instruction memory).
+// BLUETOOTH_ENABLED is DISABLED by default to ensure the firmware compiles.
+// 
+// Bluetooth Stack Selection (Automatic):
+//   - ESP32 Classic: Uses NimBLE (lightweight, BLE-only, ~1.2KB IRAM)
+//   - ESP32-S3/P4: Uses Bluedroid (full-featured, BLE+Classic, ~2.2KB IRAM)
+//
+// To enable Bluetooth features (Presence Detection, Stealth Mode, Audio):
+//   1. Uncomment the line below
+//   2. For ESP32 Classic: Set Partition Scheme to "Huge APP (3MB No OTA/1MB SPIFFS)"
+//   3. Recompile
+// #define BLUETOOTH_ENABLED     // Uncomment to enable Bluetooth features
+
+// Auto-detect Bluetooth stack based on chip (Arduino IDE compatible)
+#ifdef BLUETOOTH_ENABLED
+  #if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(ESP32S3) || defined(ARDUINO_ESP32S3_DEV)
+    #define USE_BLUEDROID     // S3 → Bluedroid (full features, more RAM)
+  #elif defined(CONFIG_IDF_TARGET_ESP32C3) || defined(ESP32C3)
+    #define USE_BLUEDROID     // C3 → Bluedroid
+  #elif defined(CONFIG_IDF_TARGET_ESP32P4) || defined(ESP32P4)
+    #define USE_BLUEDROID     // P4 → Bluedroid
+  #else
+    #define USE_NIMBLE        // ESP32 Classic → NimBLE (lighter)
+  #endif
+#endif
 
 // --- Device Information (ONVIF) ---
 // These appear in your DVR/NVR during discovery
@@ -142,8 +170,8 @@
 #define DAYLIGHT_OFFSET 0               // No DST in India
 
 // --- Debugging ---
-#define DEBUG_MODE      true            // Set to false to disable all serial output (saves CPU)
-#define DEBUG_LEVEL     3               // 1=Errors Only, 2=Info/Actions, 3=Verbose (Parsing)
+#define DEBUG_MODE      false           // Set to false to disable all serial output (saves CPU)
+#define DEBUG_LEVEL     0               // 1=Errors Only, 2=Info/Actions, 3=Verbose (Parsing)
 
 #if DEBUG_MODE
     #define LOG_E(x) Serial.println("[ERROR] " + String(x))
@@ -158,3 +186,24 @@
 // --- Helper Functions ---
 void printBanner();
 void fatalError(const char* msg);
+
+// --- Runtime Settings (Persisted to SPIFFS) ---
+enum AudioSource {
+    AUDIO_SOURCE_NONE = 0,
+    AUDIO_SOURCE_HARDWARE_I2S = 1,
+    AUDIO_SOURCE_BLUETOOTH_HFP = 2
+};
+
+struct AppSettings {
+    bool btEnabled;
+    bool btStealthMode;
+    String btPresenceMac;
+    int btPresenceTimeout; // Seconds
+    int btMicGain;        // 0-100
+    int hwMicGain;        // 0-100
+    AudioSource audioSource;
+};
+
+extern AppSettings appSettings;
+void loadSettings();
+void saveSettings();

@@ -1,6 +1,9 @@
+#include "config.h"
+#if STATUS_LED_ENABLED
+
 #include <Arduino.h>
 #include "status_led.h"
-#include "config.h"
+#include "board_config.h"
 
 // Patterns enumerator
 enum LedPattern {
@@ -15,21 +18,17 @@ static unsigned long _last_toggle = 0;
 static bool _led_state = false; // Internal state, will be inverted if needed
 
 void status_led_init() {
-    if (!STATUS_LED_ENABLED) return;
     pinMode(STATUS_LED_PIN, OUTPUT);
     status_led_off();
 }
 
 static void write_led(bool state) {
-    if (!STATUS_LED_ENABLED) return;
     // Apply inversion
     bool pinState = STATUS_LED_INVERT ? !state : state;
     digitalWrite(STATUS_LED_PIN, pinState);
 }
 
 void status_led_loop() {
-    if (!STATUS_LED_ENABLED) return;
-
     unsigned long now = millis();
     
     switch (_current_pattern) {
@@ -78,8 +77,6 @@ void status_led_off() {
 
 // Blocking flash helper for startup/events
 void status_led_flash(int count, int delayMs) {
-    if (!STATUS_LED_ENABLED) return;
-    
     // Ensure we start from known state
     write_led(false);
     delay(100);
@@ -91,3 +88,14 @@ void status_led_flash(int count, int delayMs) {
         if (i < count - 1) delay(delayMs);
     }
 }
+
+#else
+// Stub implementations when status LED is disabled
+void status_led_init() {}
+void status_led_loop() {}
+void status_led_wifi_connecting() {}
+void status_led_connected() {}
+void status_led_error() {}
+void status_led_off() {}
+void status_led_flash(int count, int delayMs) {}
+#endif

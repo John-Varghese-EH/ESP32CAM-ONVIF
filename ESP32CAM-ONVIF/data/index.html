@@ -31,6 +31,7 @@
     <div class="tabs">
       <button class="tab-btn active" onclick="setTab('dash')">Dashboard</button>
       <button class="tab-btn" onclick="setTab('cam')">Camera</button>
+      <button class="tab-btn" onclick="setTab('bt')">Connectivity</button>
       <button class="tab-btn" onclick="setTab('net')">Network</button>
       <button class="tab-btn" onclick="setTab('sys')">System</button>
     </div>
@@ -140,6 +141,64 @@
             <input type="checkbox" id="chk-onvif" checked
               onchange="api('/api/onvif/toggle', {method:'POST', body:JSON.stringify({enabled:this.checked})})">
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PANEL: AUDIO & BLUETOOTH -->
+    <div id="tab-bt" class="panel">
+      <div class="grid">
+        <div class="card glass-panel">
+          <h3>Audio Settings</h3>
+          <div class="input-group">
+            <span class="input-label">Microphone Source</span>
+            <select class="form-control" id="audio-src" onchange="cfgBt({audioSource: parseInt(this.value)})">
+              <option value="0">Mute / None</option>
+              <option value="1">Hardware I2S Mic</option>
+              <option value="2">Bluetooth Headset (HFP)</option>
+            </select>
+            <small style="color:var(--text-muted); display:block; margin-top:4px">
+              Note: Bluetooth Audio may affect WiFi performance.
+            </small>
+          </div>
+          <div class="input-group">
+            <div class="flex-row" style="margin-bottom:4px;display:flex;justify-content:space-between">
+              <span class="input-label">Microphone Gain</span>
+              <span class="value" id="lbl-gain">50%</span>
+            </div>
+            <input type="range" min="0" max="100" value="50" id="inp-gain"
+              oninput="el('lbl-gain').innerText=this.value+'%'" onchange="cfgBt({gain: parseInt(this.value)})">
+          </div>
+        </div>
+
+        <div class="card glass-panel">
+          <h3>Bluetooth Settings</h3>
+          <div class="kv-group">
+            <span>Enable Bluetooth</span>
+            <input type="checkbox" id="bt-enable" onchange="cfgBt({enabled:this.checked})">
+          </div>
+          <div class="kv-group">
+            <span>Stealth Mode (Auto-Arm)</span>
+            <input type="checkbox" id="bt-stealth" onchange="cfgBt({stealth:this.checked})"
+              title="Auto-hide LEDs when User Absent & WiFi Lost">
+          </div>
+          <div class="input-group">
+            <div class="flex-row" style="margin-bottom:4px;display:flex;justify-content:space-between">
+              <span class="input-label">Presence Timeout (sec)</span>
+              <span class="value" id="lbl-timeout">120s</span>
+            </div>
+            <input type="range" min="30" max="600" step="30" value="120" id="inp-timeout"
+              oninput="el('lbl-timeout').innerText=this.value+'s'" onchange="cfgBt({timeout: parseInt(this.value)})">
+          </div>
+          <div class="input-group">
+            <span class="input-label">Presence MAC Address</span>
+            <div style="display:flex; gap:8px">
+              <input type="text" class="form-control" id="bt-mac" placeholder="XX:XX:XX:XX:XX:XX"
+                onchange="cfgBt({mac:this.value})">
+              <button class="btn" id="btn-scan-bt" onclick="scanBt()">Scan</button>
+            </div>
+          </div>
+          <div id="bt-scan-list" style="margin-top:10px; max-height:200px; overflow-y:auto"></div>
         </div>
       </div>
     </div>

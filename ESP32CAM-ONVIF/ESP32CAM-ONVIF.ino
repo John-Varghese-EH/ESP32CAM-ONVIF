@@ -23,6 +23,9 @@
 #include "serial_console.h"
 #include "auto_flash.h"
 #include "status_led.h"
+#ifdef BLUETOOTH_ENABLED
+  #include "bluetooth_manager.h"
+#endif
 #include <esp_task_wdt.h>
 
 #define WDT_TIMEOUT 30 // 30 seconds hardware watchdog
@@ -33,6 +36,9 @@ void setup() {
   Serial.setDebugOutput(false); 
   
   Serial.println("\n\n--- ESP32-CAM STARTING ---");
+  
+  // Load Runtime Settings
+  loadSettings();
   
   // Initialize Watchdog - Version-agnostic code for both v3.x and pre-v3 board managers
   esp_task_wdt_deinit();                  // ensure a watchdog is not already configured
@@ -86,6 +92,11 @@ void setup() {
   status_led_init();
   status_led_flash(1); 
   
+  // Bluetooth (after loadSettings)
+  #ifdef BLUETOOTH_ENABLED
+    btManager.begin();
+  #endif
+  
   if(wifiConnected) {
       status_led_connected(); 
   }
@@ -110,6 +121,9 @@ void loop() {
   serial_console_loop();
   auto_flash_loop();
   status_led_loop();
+  #ifdef BLUETOOTH_ENABLED
+    btManager.loop();
+  #endif
   
   // Optional: Power saving delay if NO clients connected? 
   // For RTSP low latency, we usually avoid delay, but a yield() helps watchdog.
