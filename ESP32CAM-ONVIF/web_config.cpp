@@ -22,6 +22,13 @@
   #include "audio_manager.h"
 #endif
 
+// PTZ Servo support (if enabled)
+#if PTZ_ENABLED
+  #include <ESP32Servo.h>
+  extern Servo servoPan;
+  extern Servo servoTilt;
+#endif
+
 WebServer webConfigServer(WEB_PORT);
 
 // WEB_USER and WEB_PASS are defined in config.h
@@ -358,11 +365,7 @@ void web_config_start() {
     });
     
     // --- PTZ Control (if enabled) ---
-    #ifdef PTZ_ENABLED
-    #include <ESP32Servo.h>
-    extern Servo servoPan;
-    extern Servo servoTilt;
-    
+    #if PTZ_ENABLED
     webConfigServer.on("/api/ptz/control", HTTP_POST, []() {
         if (!isAuthenticated(webConfigServer)) return;
         StaticJsonDocument<128> doc;
