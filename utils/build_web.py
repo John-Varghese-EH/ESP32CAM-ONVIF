@@ -16,7 +16,7 @@ Usage:
     python utils/build_web.py
     python utils/build_web.py --no-minify  # Skip minification
 
-Author: ESP32CAM-ONVIF Project
+Author: John-Varghese-EH ESP32CAM-ONVIF Project
 """
 
 import os
