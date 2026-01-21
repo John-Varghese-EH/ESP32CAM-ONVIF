@@ -47,6 +47,12 @@ Transform your affordable ESP32 camera module into a **professional-grade ONVIF 
 - **Synology Surveillance Station**
 - **Any ONVIF Profile S compliant recorder**
 
+### 📶 Wireless Features (Beta)
+- **PRESENCE DETECTION**: Automatically detects if you are Home using your Phone's Bluetooth MAC.
+- **STEALTH MODE**: Turns off all lights if WiFi is lost AND you are not home.
+- **BLUETOOTH AUDIO**: Use a Bluetooth Headset as a wireless microphone (HFP).
+- **PRIORITY STREAMING**: Smart coexistence ensures WiFi RTSP streaming never stutters, even with Bluetooth on.
+
 ### 💻 Modern Web Interface
 - 🌙 **Cyberpunk/Slate Dark Theme** - Beautiful responsive SPA
 - 📊 **Live Dashboard** - Stream, Flash control, Snapshots

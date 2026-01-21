@@ -422,3 +422,302 @@ input[type=range]::-webkit-slider-thumb {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==================== NEW ADVANCED FEATURES ==================== */
+
+/* Floating Action Button (FAB) */
+.fab {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  border: none;
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
+  transition: all 0.3s ease;
+  z-index: 999;
+}
+
+.fab:hover {
+  transform: scale(1.1) rotate(90deg);
+  box-shadow: 0 12px 32px rgba(99, 102, 241, 0.6);
+}
+
+/* Quick Actions Panel */
+.quick-actions-panel {
+  position: fixed;
+  right: -300px;
+  top: 0;
+  bottom: 0;
+  width: 280px;
+  background: rgba(5, 5, 16, 0.95);
+  backdrop-filter: blur(20px);
+  border-left: 1px solid var(--glass-border);
+  padding: 1.5rem;
+  z-index: 1000;
+  transition: right 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+}
+
+.quick-actions-panel.show {
+  right: 0;
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5);
+}
+
+.quick-actions-panel h4 {
+  margin: 0 0 1rem 0;
+  font-size: 1.2rem;
+  color: #fff;
+}
+
+.quick-actions-panel .btn {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+/* Stream Performance Overlay */
+.perf-overlay {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(10px);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  z-index: 10;
+}
+
+.perf-overlay div {
+  display: flex;
+  gap: 8px;
+}
+
+.perf-overlay b {
+  color: var(--text-muted);
+  min-width: 40px;
+}
+
+.perf-overlay span {
+  color: var(--success);
+  font-family: monospace;
+}
+
+/* Event Log */
+.event-list {
+  max-height: 600px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.event-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  border-left: 3px solid var(--primary);
+  font-size: 0.9rem;
+}
+
+.event-time {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-family: monospace;
+  min-width: 80px;
+}
+
+.event-icon {
+  font-size: 1.2rem;
+}
+
+.event-msg {
+  flex: 1;
+  color: var(--text-main);
+}
+
+/* Recording Items */
+.recording-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--glass-border);
+}
+
+.recording-item b {
+  color: #fff;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.recording-item small {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.recording-item>div:last-child {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Video Modal */
+.video-modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.95);
+  z-index: 2000;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.video-modal-content {
+  position: relative;
+  max-width: 1200px;
+  width: 100%;
+}
+
+.video-modal-close {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  background: rgba(239, 68, 68, 0.8);
+  border: none;
+  color: white;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.2rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.video-modal-close:hover {
+  background: var(--danger);
+  transform: scale(1.1);
+}
+
+/* Checkbox Styling */
+input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Mobile Responsiveness for New Features */
+@media(max-width: 600px) {
+  .fab {
+    bottom: 1rem;
+    right: 1rem;
+    width: 50px;
+    height: 50px;
+    font-size: 1.2rem;
+  }
+
+  .quick-actions-panel {
+    width: 100%;
+    right: -100%;
+  }
+
+  .perf-overlay {
+    font-size: 0.65rem;
+    padding: 6px 8px;
+  }
+
+  .event-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .event-time {
+    min-width: auto;
+  }
+
+  .recording-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .recording-item>div:last-child {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .recording-item>div:last-child .btn {
+    width: 100%;
+  }
+}
+
+/* ==================== OBJECT DETECTION ==================== */
+.detection-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 15;
+}
+
+/* ==================== KIOSK MODE ==================== */
+.kiosk-mode {
+  background: #000;
+}
+
+.kiosk-hide-ui header,
+.kiosk-hide-ui .tabs,
+.kiosk-hide-ui .fab {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+body:not(.kiosk-mode) .kiosk-hide-ui {
+  /* Reset when not in kiosk mode */
+}

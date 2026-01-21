@@ -4,10 +4,10 @@
 #include "esp_camera.h"
 #include "config.h"
 #include "board_config.h"
-#ifdef PTZ_ENABLED
+#if PTZ_ENABLED
 #include <ESP32Servo.h>
-Servo panServo;
-Servo tiltServo;
+Servo servoPan;   // Match names used in web_config.cpp
+Servo servoTilt;  // Match names used in web_config.cpp
 #endif
 
 bool camera_init() {
@@ -80,14 +80,14 @@ void set_flash_led(bool on) {
 #if PTZ_ENABLED
 void ptz_init() {
     // Basic Servo init
-    panServo.setPeriodHertz(50); 
-    panServo.attach(SERVO_PAN_PIN, 500, 2400);
-    tiltServo.setPeriodHertz(50);
-    tiltServo.attach(SERVO_TILT_PIN, 500, 2400);
+    servoPan.setPeriodHertz(50); 
+    servoPan.attach(SERVO_PAN_PIN, 500, 2400);
+    servoTilt.setPeriodHertz(50);
+    servoTilt.attach(SERVO_TILT_PIN, 500, 2400);
     
     // Center alignment
-    panServo.write(90);
-    tiltServo.write(90);
+    servoPan.write(90);
+    servoTilt.write(90);
     Serial.println("[INFO] PTZ Servos initialized.");
 }
 
@@ -101,8 +101,8 @@ void ptz_set_absolute(float x, float y) {
     if (panAngle < 0) panAngle = 0; if (panAngle > 180) panAngle = 180;
     if (tiltAngle < 0) tiltAngle = 0; if (tiltAngle > 180) tiltAngle = 180;
     
-    panServo.write(panAngle);
-    tiltServo.write(tiltAngle);
+    servoPan.write(panAngle);
+    servoTilt.write(tiltAngle);
 }
 
 // Simple step move for continuous simulation

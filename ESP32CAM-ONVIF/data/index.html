@@ -8,6 +8,9 @@
   <meta name="theme-color" content="#000000">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="icon" href="data:,">
+  <!-- TensorFlow.js for Object Detection -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -27,12 +30,29 @@
     </div>
   </header>
 
+  <!-- Quick Actions FAB -->
+  <button class="fab" onclick="toggleQuickActions()" title="Quick Actions">⚡</button>
+
+  <div class="quick-actions-panel" id="quick-actions">
+    <h4>Quick Actions</h4>
+    <button class="btn" onclick="quickReboot()">🔄 Reboot</button>
+    <button class="btn" onclick="snap()">📸 Snapshot</button>
+    <button class="btn" onclick="toggleRecord()">🎥 Toggle Recording</button>
+    <button class="btn" onclick="toggleFlash()">💡 Toggle Flash</button>
+    <button class="btn" onclick="quickToggleONVIF()">📡 Toggle ONVIF</button>
+    <button class="btn" onclick="applyPreset('Night')">🌙 Night Mode</button>
+    <button class="btn" onclick="applyPreset('Daytime')">☀️ Day Mode</button>
+    <button class="btn" onclick="toggleQuickActions()">✖ Close</button>
+  </div>
+
   <main>
     <div class="tabs">
-      <button class="tab-btn active" onclick="setTab('dash')">Dashboard</button>
-      <button class="tab-btn" onclick="setTab('cam')">Camera</button>
-      <button class="tab-btn" onclick="setTab('net')">Network</button>
-      <button class="tab-btn" onclick="setTab('sys')">System</button>
+      <button class="tab-btn active" onclick="setTab('dash', event)">Dashboard</button>
+      <button class="tab-btn" onclick="setTab('cam', event)">Camera</button>
+      <button class="tab-btn" onclick="setTab('net', event)">Network</button>
+      <button class="tab-btn" onclick="setTab('events', event)">Events</button>
+      <button class="tab-btn" onclick="setTab('recordings', event)">Recordings</button>
+      <button class="tab-btn" onclick="setTab('sys', event)">System</button>
     </div>
 
     <!-- PANEL: DASHBOARD -->
@@ -40,6 +60,13 @@
       <div class="video-container glass-panel" id="vcont">
         <img id="stream" class="video-feed" src="" alt="Connecting..." crossorigin="anonymous">
         <div id="rec-toast" class="rec-toast">Recording Started</div>
+
+        <!-- Stream Performance Overlay -->
+        <div class="perf-overlay">
+          <div><b>FPS:</b> <span id="perf-fps">--</span></div>
+          <div><b>Lost:</b> <span id="perf-dropped">0 frames</span></div>
+        </div>
+
         <div class="video-controls">
           <button class="btn btn-icon glass-panel" onclick="toggleStream()" title="Play/Pause">⏯</button>
           <button class="btn btn-icon glass-panel" id="btn-record" onclick="toggleRecord()" title="Record"
@@ -52,18 +79,36 @@
 
       <div class="grid">
         <div class="card glass-panel">
-          <h3>System Status</h3>
+          <h3>📊 System Status</h3>
           <div class="kv-group"><span class="label">Uptime</span> <span class="value" id="val-uptime">-</span></div>
           <div class="kv-group"><span class="label">Heap Free</span> <span class="value" id="val-heap">-</span></div>
           <div class="kv-group"><span class="label">WiFi Signal</span> <span class="value" id="val-rssi">-</span></div>
           <div class="kv-group"><span class="label">Motion</span> <span class="value" id="val-motion">-</span></div>
+          <div class="kv-group">
+            <span class="label">AI Detection</span>
+            <span class="value" id="detection-count" style="color:#6366f1">0 objects</span>
+          </div>
+          <button class="btn btn-primary" style="width:100%; margin-top:0.5rem" onclick="toggleDetection()"
+            id="btn-detection">
+            🤖 Enable AI Detection
+          </button>
         </div>
 
         <div class="card glass-panel">
-          <h3>Recording Settings</h3>
+          <h3>🎥 System Info</h3>
+          <div class="kv-group"><span class="label">Resolution</span> <span class="value" id="info-resolution">-</span>
+          </div>
+          <div class="kv-group"><span class="label">Codec</span> <span class="value" id="info-codec">-</span></div>
+          <div class="kv-group"><span class="label">Flash Storage</span> <span class="value" id="info-flash">-</span>
+          </div>
+          <div class="kv-group"><span class="label">PSRAM</span> <span class="value" id="info-psram">-</span></div>
+        </div>
+
+        <div class="card glass-panel">
+          <h3>💾 Recording</h3>
           <div class="kv-group">
-            <span class="label">Storage Location</span>
-            <select class="form-control" style="width:auto" id="rec-mode">
+            <span class="label">Location</span>
+            <select class="form-control" style="width:auto" id="rec-mode" name="rec-mode">
               <option value="device">Device (Client)</option>
               <option value="sd">SD Card (Server)</option>
             </select>
@@ -80,14 +125,36 @@
     <div id="tab-cam" class="panel">
       <div class="grid">
         <div class="card glass-panel">
-          <h3>Image Settings</h3>
+          <h3>⚡ Quality Presets</h3>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem;">
+            <button class="btn" onclick="applyPreset('Low')">Low (QVGA)</button>
+            <button class="btn" onclick="applyPreset('Medium')">Medium (VGA)</button>
+            <button class="btn" onclick="applyPreset('High')">High (HD)</button>
+            <button class="btn" onclick="applyPreset('Ultra')">Ultra (UXGA)</button>
+          </div>
+        </div>
+
+        <div class="card glass-panel">
+          <h3>📁 Camera Profiles</h3>
+          <select class="form-control" id="profile-list" onchange="loadProfile()" style="margin-bottom: 0.5rem">
+            <option value="">Select Profile...</option>
+          </select>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+            <button class="btn" onclick="saveProfile()">💾 Save</button>
+            <button class="btn" onclick="deleteProfile()">🗑 Delete</button>
+          </div>
+        </div>
+
+        <div class="card glass-panel">
+          <h3>🔧 Image Settings</h3>
           <div class="input-group">
             <span class="input-label">Resolution</span>
-            <select class="form-control" onchange="cfg('resolution', this.value)">
+            <select class="form-control" id="camera-resolution" name="camera-resolution"
+              onchange="cfg('resolution', this.value)">
               <option value="FRAMESIZE_UXGA">UXGA (1600x1200)</option>
               <option value="FRAMESIZE_SXGA">SXGA (1280x1024)</option>
               <option value="FRAMESIZE_HD">HD (1280x720)</option>
-              <option value="FRAMESIZE_VGA" selected>VGA (640x480) [Rec.]</option>
+              <option value="FRAMESIZE_VGA" selected>VGA (640x480)</option>
               <option value="FRAMESIZE_QVGA">QVGA (320x240)</option>
               <option value="FRAMESIZE_QQVGA">QQVGA (160x120)</option>
             </select>
@@ -95,67 +162,237 @@
 
           <div class="input-group">
             <div class="flex-row" style="margin-bottom:4px;display:flex;justify-content:space-between">
-              <span class="input-label">Quality (Lower is Better)</span>
+              <span class="input-label">Quality</span>
               <span class="value" id="lbl-qual">12</span>
             </div>
-            <input type="range" min="4" max="63" value="12" oninput="el('lbl-qual').innerText=this.value"
-              onchange="cfg('quality', this.value)">
+            <input type="range" min="4" max="63" value="12" id="camera-quality" name="camera-quality"
+              oninput="el('lbl-qual').innerText=this.value" onchange="cfg('quality', this.value)">
           </div>
 
           <div class="input-group">
             <span class="input-label">Brightness</span>
-            <input type="range" min="-2" max="2" value="0" onchange="cfg('brightness', this.value)">
+            <input type="range" min="-2" max="2" value="0" id="camera-brightness" name="camera-brightness"
+              onchange="cfg('brightness', this.value)">
           </div>
           <div class="input-group">
             <span class="input-label">Contrast</span>
-            <input type="range" min="-2" max="2" value="0" onchange="cfg('contrast', this.value)">
+            <input type="range" min="-2" max="2" value="0" id="camera-contrast" name="camera-contrast"
+              onchange="cfg('contrast', this.value)">
           </div>
         </div>
 
         <div class="card glass-panel">
-          <h3>Advanced</h3>
+          <h3>🎨 Advanced Controls</h3>
+          <div class="input-group">
+            <div class="flex-row" style="margin-bottom:4px;display:flex;justify-content:space-between">
+              <span class="input-label">Saturation</span>
+              <span class="value" id="lbl-saturation">0</span>
+            </div>
+            <input type="range" min="-2" max="2" value="0" id="inp-saturation"
+              oninput="el('lbl-saturation').innerText=this.value" onchange="cfg('saturation', this.value)">
+          </div>
+
+          <div class="input-group">
+            <div class="flex-row" style="margin-bottom:4px;display:flex;justify-content:space-between">
+              <span class="input-label">Exposure Level</span>
+              <span class="value" id="lbl-aelevel">0</span>
+            </div>
+            <input type="range" min="-2" max="2" value="0" id="camera-ae-level" name="camera-ae-level"
+              oninput="el('lbl-aelevel').innerText=this.value" onchange="cfg('ae_level', this.value)">
+          </div>
+
+          <div class="input-group">
+            <div class="flex-row" style="margin-bottom:4px;display:flex;justify-content:space-between">
+              <span class="input-label">Gain Ceiling</span>
+              <span class="value" id="lbl-gain-ceil">0</span>
+            </div>
+            <input type="range" min="0" max="6" value="0" id="camera-gain-ceiling" name="camera-gain-ceiling"
+              oninput="el('lbl-gain-ceil').innerText=this.value" onchange="cfg('gainceiling', this.value)">
+          </div>
+
           <div class="kv-group">
-            <span>Auto Flash (Night Mode)</span>
-            <input type="checkbox" id="chk-autoflash"
+            <span>Auto White Balance</span>
+            <input type="checkbox" id="camera-awb" name="camera-awb" checked
+              onchange="cfg('awb', this.checked ? 1 : 0)">
+          </div>
+          <div class="kv-group">
+            <span>Auto Gain</span>
+            <input type="checkbox" id="camera-agc" name="camera-agc" checked
+              onchange="cfg('agc', this.checked ? 1 : 0)">
+          </div>
+        </div>
+
+        <div class="card glass-panel">
+          <h3>⚙️ Advanced</h3>
+          <div class="kv-group">
+            <span>Auto Flash</span>
+            <input type="checkbox" id="chk-autoflash" name="chk-autoflash"
               onchange="api('/api/autoflash', {method:'POST', body:JSON.stringify({enabled:this.checked})})">
           </div>
           <div class="kv-group">
             <span>Vertical Flip</span>
-            <input type="checkbox" onchange="cfg('vflip', this.checked ? 1 : 0)">
+            <input type="checkbox" id="camera-vflip" name="camera-vflip" onchange="cfg('vflip', this.checked ? 1 : 0)">
           </div>
           <div class="kv-group">
-            <span>Horizontal Mirror</span>
-            <input type="checkbox" onchange="cfg('hmirror', this.checked ? 1 : 0)">
+            <span>H-Mirror</span>
+            <input type="checkbox" id="camera-hmirror" name="camera-hmirror"
+              onchange="cfg('hmirror', this.checked ? 1 : 0)">
           </div>
           <div class="kv-group">
             <span>Auto Exposure</span>
-            <input type="checkbox" checked onchange="cfg('aec', this.checked ? 1 : 0)">
+            <input type="checkbox" id="camera-aec" name="camera-aec" checked
+              onchange="cfg('aec', this.checked ? 1 : 0)">
           </div>
         </div>
 
         <div class="card glass-panel" style="border-left: 4px solid var(--primary)">
-          <h3>ONVIF Settings</h3>
+          <h3>📡 ONVIF</h3>
           <div class="kv-group">
-            <span>Enable ONVIF Service</span>
-            <input type="checkbox" id="chk-onvif" checked
+            <span>Enable ONVIF</span>
+            <input type="checkbox" id="chk-onvif" name="chk-onvif" checked
               onchange="api('/api/onvif/toggle', {method:'POST', body:JSON.stringify({enabled:this.checked})})">
           </div>
         </div>
       </div>
     </div>
 
-    <!-- PANEL: NETWORK -->
+    <!-- PANEL: NETWORK (MERGED WITH CONNECTIVITY) -->
     <div id="tab-net" class="panel">
-      <div class="card glass-panel" style="max-width: 600px; margin: 0 auto;">
-        <h3>WiFi Manager</h3>
-
-        <div style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-          <div class="kv-group"><span class="label">SSID</span> <span class="value" id="wifi-ssid">...</span></div>
-          <div class="kv-group"><span class="label">IP Address</span> <span class="value" id="wifi-ip">...</span></div>
+      <div class="grid">
+        <!-- WiFi Section -->
+        <div class="card glass-panel">
+          <h3>📡 WiFi Manager</h3>
+          <div style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <div class="kv-group"><span class="label">SSID</span> <span class="value" id="wifi-ssid">...</span></div>
+            <div class="kv-group"><span class="label">IP</span> <span class="value" id="wifi-ip">...</span></div>
+          </div>
+          <button class="btn btn-primary" style="width:100%; margin-bottom: 0.5rem" onclick="scanWifi()"
+            id="btn-scan">Scan Networks</button>
+          <div id="wifi-list"></div>
         </div>
 
-        <button class="btn btn-primary" style="width:100%" onclick="scanWifi()" id="btn-scan">Scan Networks</button>
-        <div id="wifi-list" style="margin-top: 1rem;"></div>
+        <!-- Network Diagnostics -->
+        <div class="card glass-panel">
+          <h3>🔍 Diagnostics</h3>
+          <button class="btn" style="width:100%; margin-bottom: 0.5rem" id="btn-ping" onclick="runPingTest()">Run Ping
+            Test</button>
+          <div id="ping-result"
+            style="padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 4px; font-size: 0.85rem;">
+            Click button to test latency
+          </div>
+        </div>
+
+        <!-- Bluetooth & Audio Section -->
+        <div class="card glass-panel">
+          <h3>🎤 Audio</h3>
+          <div class="input-group">
+            <span class="input-label">Source</span>
+            <select class="form-control" id="audio-src" name="audio-src"
+              onchange="cfgBt({audioSource: parseInt(this.value)})">
+              <option value="0">Mute</option>
+              <option value="1">Hardware I2S</option>
+              <option value="2">Bluetooth HFP</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <div class="flex-row" style="margin-bottom:4px;display:flex;justify-content:space-between">
+              <span class="input-label">Gain</span>
+              <span class="value" id="lbl-gain">50%</span>
+            </div>
+            <input type="range" min="0" max="100" value="50" id="inp-gain" name="inp-gain"
+              oninput="el('lbl-gain').innerText=this.value+'%'" onchange="cfgBt({gain: parseInt(this.value)})">
+          </div>
+        </div>
+
+        <!-- Bluetooth Device Connection -->
+        <div class="card glass-panel">
+          <h3>🎧 Bluetooth Devices</h3>
+
+          <!-- Connection Status -->
+          <div style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem;">
+            <div class="kv-group">
+              <span class="label">Status</span>
+              <span class="value" id="bt-status">Disconnected</span>
+            </div>
+            <div class="kv-group">
+              <span class="label">Connected Device</span>
+              <span class="value" id="bt-connected-name">None</span>
+            </div>
+          </div>
+
+          <!-- Scan & Pair -->
+          <button class="btn btn-primary" style="width:100%; margin-bottom: 0.5rem" onclick="scanBtDevices()">
+            🔍 Scan for Devices
+          </button>
+
+          <!-- Scanned Devices List -->
+          <div id="bt-devices-list" style="max-height: 250px; overflow-y: auto;"></div>
+        </div>
+
+        <!-- Bluetooth Settings -->
+        <div class="card glass-panel">
+          <h3>⚙️ Bluetooth Settings</h3>
+          <div class="kv-group">
+            <span>Enable BT</span>
+            <input type="checkbox" id="bt-enable" name="bt-enable" onchange="cfgBt({enabled:this.checked})">
+          </div>
+          <div class="kv-group">
+            <span>Discoverable</span>
+            <input type="checkbox" id="bt-discoverable" name="bt-discoverable"
+              onchange="cfgBt({discoverable:this.checked})">
+          </div>
+          <div class="kv-group">
+            <span>Stealth Mode</span>
+            <input type="checkbox" id="bt-stealth" name="bt-stealth" onchange="cfgBt({stealth:this.checked})">
+          </div>
+          <div class="input-group">
+            <div class="flex-row" style="margin-bottom:4px;display:flex;justify-content:space-between">
+              <span class="input-label">Connection Timeout</span>
+              <span class="value" id="lbl-timeout">120s</span>
+            </div>
+            <input type="range" min="30" max="600" step="30" value="120" id="inp-timeout" name="inp-timeout"
+              oninput="el('lbl-timeout').innerText=this.value+'s'" onchange="cfgBt({timeout: parseInt(this.value)})">
+          </div>
+        </div>
+
+        <!-- Presence Detection (Optional) -->
+        <div class="card glass-panel">
+          <h3>📍 Presence Detection</h3>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+            Monitor if a specific device is nearby (for automation)
+          </p>
+          <div class="input-group">
+            <span class="input-label">Monitor MAC Address</span>
+            <input type="text" class="form-control" id="bt-mac" name="bt-mac" placeholder="XX:XX:XX:XX:XX:XX"
+              onchange="cfgBt({mac:this.value})">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PANEL: EVENTS -->
+    <div id="tab-events" class="panel">
+      <div class="card glass-panel" style="max-width: 800px; margin: 0 auto;">
+        <h3>📝 Event Log</h3>
+        <button class="btn" style="margin-bottom: 1rem; width: 100%" onclick="clearEventLog()">🗑 Clear Events</button>
+        <div id="event-list" class="event-list"></div>
+      </div>
+    </div>
+
+    <!-- PANEL: RECORDINGS -->
+    <div id="tab-recordings" class="panel">
+      <div class="card glass-panel" style="max-width: 900px; margin: 0 auto;">
+        <h3>🎬 Video Recordings</h3>
+        <button class="btn" style="margin-bottom: 1rem; width: 100%" onclick="loadRecordings()">🔄 Refresh List</button>
+        <div id="recordings-list"></div>
+      </div>
+    </div>
+
+    <!-- Video Player Modal -->
+    <div id="video-modal" class="video-modal" onclick="if(event.target === this) closeVideoPlayer()">
+      <div class="video-modal-content">
+        <button class="video-modal-close" onclick="closeVideoPlayer()">✖</button>
+        <video id="video-player" controls style="width: 100%; max-height: 70vh;"></video>
       </div>
     </div>
 
@@ -163,8 +400,7 @@
     <div id="tab-sys" class="panel">
       <div class="grid">
         <div class="card glass-panel">
-          <h3>Firmware Update</h3>
-          <p class="label">Upload .bin file to update firmware</p>
+          <h3>📦 Firmware</h3>
           <input type="file" id="ota-file" class="form-control" accept=".bin" style="margin-bottom: 1rem">
           <div
             style="height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow:hidden; margin-bottom: 1rem">
@@ -174,15 +410,39 @@
         </div>
 
         <div class="card glass-panel">
-          <h3>Power & Storage</h3>
-          <button class="btn" style="margin-bottom:0.5rem" onclick="window.open('/api/sd/list','_blank')">📂 Browse SD
-            Card</button>
-          <button class="btn" style="margin-bottom:0.5rem"
+          <h3>💾 SD Card</h3>
+          <div class="kv-group"><span class="label">Total</span> <span class="value" id="sd-total">-</span></div>
+          <div class="kv-group"><span class="label">Used</span> <span class="value" id="sd-used">-</span></div>
+          <div class="kv-group"><span class="label">Free</span> <span class="value" id="sd-free">-</span></div>
+          <div class="kv-group"><span class="label">Files</span> <span class="value" id="sd-files">-</span></div>
+          <div
+            style="height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow:hidden; margin-top: 0.5rem">
+            <div id="sd-progress-bar" style="width:0%; height:100%; background: var(--success); transition: width 0.3s">
+            </div>
+          </div>
+        </div>
+
+        <div class="card glass-panel">
+          <h3>⚙️ Settings</h3>
+          <button class="btn btn-primary" style="width:100%; margin-bottom: 0.5rem" onclick="exportSettings()">💾
+            Export</button>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <input type="file" id="import-file" class="form-control" accept=".json" style="flex: 1">
+            <button class="btn" onclick="importSettings()">📥 Import</button>
+          </div>
+        </div>
+
+        <div class="card glass-panel">
+          <h3>🔧 Power</h3>
+          <button class="btn" style="margin-bottom:0.5rem; width:100%" onclick="window.open('/api/sd/list','_blank')">📂
+            Browse SD</button>
+          <button class="btn" style="margin-bottom:0.5rem; width:100%"
             onclick="api('/api/time',{method:'POST',body:JSON.stringify({epoch:Math.floor(Date.now()/1000)})}).then(()=>alert('Synced!'))">🕒
             Sync Time</button>
-          <button class="btn" style="color:var(--danger); border-color:rgba(239,68,68,0.3)"
-            onclick="if(confirm('Reboot device?')) api('/reboot',{method:'POST'}).then(()=>alert('Rebooting... Device will restart.'))">🔄
-            Reboot Device</button>
+          <button class="btn" style="margin-bottom:0.5rem; width:100%" onclick="updateSDInfo()">🔄 Refresh SD</button>
+          <button class="btn" style="color:var(--danger); border-color:rgba(239,68,68,0.3); width:100%"
+            onclick="if(confirm('Reboot?')) api('/reboot',{method:'POST'}).then(()=>alert('Rebooting...'))">🔄
+            Reboot</button>
         </div>
       </div>
     </div>
