@@ -1,10 +1,15 @@
-#include "onvif_server.h"
+#include <Arduino.h>
+#include <stdint.h>
+#include <string.h>
+#ifndef PROGMEM
+#define PROGMEM
+#endif
 #include "camera_control.h"
 #include "config.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/sha1.h"
+#include "onvif_server.h"
 #include "rtsp_server.h"
-#include <Arduino.h>
 #include <WebServer.h>
 #include <WiFiUdp.h>
 #include <time.h>
@@ -16,16 +21,16 @@ static bool _onvifEnabled = DEFAULT_ONVIF_ENABLED;
 bool onvif_is_enabled() { return _onvifEnabled; }
 void onvif_set_enabled(bool en) { _onvifEnabled = en; }
 
-const char PROGMEM PART_HEADER[] =
+const char PART_HEADER[] PROGMEM =
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?><SOAP-ENV:Envelope "
     "xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\" ";
-const char PROGMEM PART_BODY[] = "<SOAP-ENV:Body>";
-const char PROGMEM PART_END[] = "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
+const char PART_BODY[] PROGMEM = "<SOAP-ENV:Body>";
+const char PART_END[] PROGMEM = "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
 
 // --- PROGMEM Templates ---
 // GetCapabilities Response - Uses tt: namespace for Capabilities content per
 // ONVIF spec
-const char PROGMEM TPL_CAPABILITIES[] =
+const char TPL_CAPABILITIES[] PROGMEM =
     "xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\" "
     "xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
     "<SOAP-ENV:Body>"
@@ -67,7 +72,7 @@ const char PROGMEM TPL_CAPABILITIES[] =
     "</tds:GetCapabilitiesResponse>"
     "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
 
-const char PROGMEM TPL_DEV_INFO[] =
+const char TPL_DEV_INFO[] PROGMEM =
     "xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\">"
     "<SOAP-ENV:Body>"
     "<tds:GetDeviceInformationResponse>"
@@ -79,7 +84,7 @@ const char PROGMEM TPL_DEV_INFO[] =
     "</tds:GetDeviceInformationResponse>"
     "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
 
-const char PROGMEM TPL_STREAM_URI[] =
+const char TPL_STREAM_URI[] PROGMEM =
     "xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\" "
     "xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
     "<SOAP-ENV:Body>"
