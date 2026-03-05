@@ -225,13 +225,28 @@ int findXmlElementStart(const String &xml, const char *elementName,
     strcpy(tag + 1, prefixes[i]);
     strcpy(tag + 1 + prefixLen, elementName);
 
-    int idx = xml.indexOf(tag, searchFrom);
-    if (idx >= 0) {
-      // Find the closing > of the opening tag (handles attributes)
-      int closeTag = xml.indexOf(">", idx);
-      if (closeTag >= 0) {
-        return closeTag + 1; // Return position after >
+    int searchPos = searchFrom;
+    while (true) {
+      int idx = xml.indexOf(tag, searchPos);
+      if (idx < 0)
+        break;
+
+      // Verify the character after the element name is a valid tag terminator
+      // (not a letter), to avoid matching e.g. <UsernameToken when seeking
+      // <Username
+      int afterElem = idx + 1 + (int)prefixLen + (int)elemLen;
+      char nextChar =
+          (afterElem < (int)xml.length()) ? xml[afterElem] : '\0';
+      if (nextChar == '>' || nextChar == ' ' || nextChar == '/' ||
+          nextChar == '\t' || nextChar == '\r' || nextChar == '\n') {
+        // Valid element found; find the closing > of the opening tag
+        int closeTag = xml.indexOf(">", idx);
+        if (closeTag >= 0) {
+          return closeTag + 1; // Return position after >
+        }
       }
+      // Partial match (e.g. <UsernameToken); skip past it and keep searching
+      searchPos = idx + 1;
     }
   }
   return -1;
