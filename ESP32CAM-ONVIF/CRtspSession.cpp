@@ -410,23 +410,30 @@ void CRtspSession::Handle_RtspPLAY()
 {
     static char Response[1024];
 
-    // Get IP for dynamic URL construction
-    IPADDRESS clientip;
-    IPPORT clientport;
-    socketpeeraddr(m_RtspClient, &clientip, &clientport);
-    
-    // Hikvision-compatible PLAY response with proper timeout and RTP-Info
+    // Build stream path from the persisted m_StreamID set during DESCRIBE
+    char StreamPath[64];
+    switch (m_StreamID)
+    {
+    case 0: strcpy(StreamPath, "mjpeg/1"); break;
+    case 1: strcpy(StreamPath, "mjpeg/2"); break;
+    case 2: strcpy(StreamPath, "h264/1");  break;
+    case 3: strcpy(StreamPath, "h264/2");  break;
+    default: strcpy(StreamPath, "mjpeg/1"); break;
+    }
+
+    // m_URLHostPort already contains "host:port" from the parsed RTSP URL;
+    // do not append an additional hardcoded port.
     snprintf(Response,sizeof(Response),
              "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
              "%s\r\n"
              "Range: npt=0.000-\r\n"
              "Session: %i;timeout=60\r\n"
-             "RTP-Info: url=rtsp://%s:%d/mjpeg/1/track1;seq=0;rtptime=0\r\n\r\n",
+             "RTP-Info: url=rtsp://%s/%s/track1;seq=0;rtptime=0\r\n\r\n",
              m_CSeq,
              DateHeader(),
              m_RtspSessionID,
              m_URLHostPort,
-             554);
+             StreamPath);
 
     socketsend(m_RtspClient,Response,strlen(Response));
 }

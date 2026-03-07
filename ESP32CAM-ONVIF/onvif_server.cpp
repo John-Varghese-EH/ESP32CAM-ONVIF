@@ -241,7 +241,7 @@ int findXmlElementStart(const String &xml, const char *elementName,
           nextChar == '\t' || nextChar == '\r' || nextChar == '\n') {
         // Valid element found; find the closing > of the opening tag
         int closeTag = xml.indexOf(">", idx);
-        if (closeTag >= 0) {
+        if (closeTag >= 0 && closeTag + 1 <= (int)xml.length()) {
           return closeTag + 1; // Return position after >
         }
       }
@@ -965,18 +965,9 @@ void handle_ptz(String &req) {
       y = val.toFloat();
     }
 
-    // ONVIF uses -1 to 1. Map to 0 to 1.
-    // x = (x + 1.0) / 2.0;
-    // y = (y + 1.0) / 2.0;
-    // NOTE: Some NVRs assume 0..1, others -1..1.
-    // Let's assume -1..1 for standard ONVIF PTZ vectors.
-
-    float finalX = (x + 1.0f) / 2.0f;
-    float finalY = (y + 1.0f) / 2.0f;
-
-    ptz_set_absolute(finalX, finalY);
-    Serial.printf("[INFO] PTZ Move: x=%.2f y=%.2f -> servo=%.2f, %.2f\n", x, y,
-                  finalX, finalY);
+    // Pass ONVIF-native -1..1 values directly; ptz_set_absolute() performs the mapping.
+    ptz_set_absolute(x, y);
+    Serial.printf("[INFO] PTZ AbsoluteMove: x=%.2f y=%.2f\n", x, y);
   }
 #endif
 }

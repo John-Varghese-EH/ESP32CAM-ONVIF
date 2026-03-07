@@ -38,11 +38,15 @@ H264Streamer::H264Streamer()
       m_initialized(false),
       m_spsSize(0),
       m_ppsSize(0),
-      m_spsPpsValid(false) {
+      m_spsPpsValid(false),
+      m_sequenceNumber(0),
+      m_lastMsec(0),
+      m_rtpTimestamp(0) {
     
     memset(&m_config, 0, sizeof(m_config));
     memset(m_sps, 0, sizeof(m_sps));
     memset(m_pps, 0, sizeof(m_pps));
+    memset(m_rtpBuf, 0, sizeof(m_rtpBuf));
 }
 
 H264Streamer::~H264Streamer() {
@@ -128,16 +132,13 @@ void H264Streamer::streamImage(uint32_t curMsec) {
     }
     
     // Calculate RTP timestamp (90kHz clock)
-    static uint32_t lastMsec = 0;
-    static uint32_t rtpTimestamp = 0;
-    
-    if (lastMsec == 0) {
-        lastMsec = curMsec;
+    if (m_lastMsec == 0) {
+        m_lastMsec = curMsec;
     }
     
-    uint32_t deltaMsec = curMsec - lastMsec;
-    rtpTimestamp += (deltaMsec * 90); // 90kHz = 90 ticks per ms
-    lastMsec = curMsec;
+    uint32_t deltaMsec = curMsec - m_lastMsec;
+    m_rtpTimestamp += (deltaMsec * 90); // 90kHz = 90 ticks per ms
+    m_lastMsec = curMsec;
     
     // Parse and send NAL units
     size_t offset = 0;
@@ -156,7 +157,7 @@ void H264Streamer::streamImage(uint32_t curMsec) {
         bool isLast = (nalEnd >= (int)encoded_frame.size);
         
         // Send the NAL unit
-        sendNALUnit(encoded_frame.data + nalStart, nalSize, isLast, rtpTimestamp);
+        sendNALUnit(encoded_frame.data + nalStart, nalSize, isLast, m_rtpTimestamp);
         
         offset = nalEnd;
     }
@@ -236,46 +237,43 @@ void H264Streamer::sendNALUnit(const uint8_t* nalData, size_t nalSize, bool isLa
 }
 
 void H264Streamer::sendH264RtpPacket(const uint8_t* data, size_t size, bool marker, uint32_t timestamp) {
-    // Buffer for RTP packet (interleaved header + RTP header + payload)
-    static uint8_t rtpBuf[1600];
-    static uint16_t sequenceNumber = 0;
-    
+    // Use per-instance buffer and sequence counter (no shared statics)
     size_t rtpPacketSize = RTP_HEADER_SIZE + size;
     
     // RTP-over-RTSP interleaved header (4 bytes)
-    rtpBuf[0] = '$';        // Magic
-    rtpBuf[1] = 0;          // Channel (RTP)
-    rtpBuf[2] = (rtpPacketSize >> 8) & 0xFF;
-    rtpBuf[3] = rtpPacketSize & 0xFF;
+    m_rtpBuf[0] = '$';        // Magic
+    m_rtpBuf[1] = 0;          // Channel (RTP)
+    m_rtpBuf[2] = (rtpPacketSize >> 8) & 0xFF;
+    m_rtpBuf[3] = rtpPacketSize & 0xFF;
     
     // RTP Header (12 bytes)
-    rtpBuf[4] = 0x80;       // V=2, P=0, X=0, CC=0
-    rtpBuf[5] = 96;         // PT=96 (dynamic H.264)
-    if (marker) rtpBuf[5] |= 0x80;  // Marker bit
+    m_rtpBuf[4] = 0x80;       // V=2, P=0, X=0, CC=0
+    m_rtpBuf[5] = 96;         // PT=96 (dynamic H.264)
+    if (marker) m_rtpBuf[5] |= 0x80;  // Marker bit
     
     // Sequence number (big endian)
-    rtpBuf[6] = (sequenceNumber >> 8) & 0xFF;
-    rtpBuf[7] = sequenceNumber & 0xFF;
-    sequenceNumber++;
+    m_rtpBuf[6] = (m_sequenceNumber >> 8) & 0xFF;
+    m_rtpBuf[7] = m_sequenceNumber & 0xFF;
+    m_sequenceNumber++;
     
     // Timestamp (big endian)
-    rtpBuf[8]  = (timestamp >> 24) & 0xFF;
-    rtpBuf[9]  = (timestamp >> 16) & 0xFF;
-    rtpBuf[10] = (timestamp >> 8) & 0xFF;
-    rtpBuf[11] = timestamp & 0xFF;
+    m_rtpBuf[8]  = (timestamp >> 24) & 0xFF;
+    m_rtpBuf[9]  = (timestamp >> 16) & 0xFF;
+    m_rtpBuf[10] = (timestamp >> 8) & 0xFF;
+    m_rtpBuf[11] = timestamp & 0xFF;
     
     // SSRC (fixed)
-    rtpBuf[12] = 0x13;
-    rtpBuf[13] = 0xF9;
-    rtpBuf[14] = 0x7E;
-    rtpBuf[15] = 0x68;
+    m_rtpBuf[12] = 0x13;
+    m_rtpBuf[13] = 0xF9;
+    m_rtpBuf[14] = 0x7E;
+    m_rtpBuf[15] = 0x68;
     
     // Copy payload
-    memcpy(rtpBuf + 4 + RTP_HEADER_SIZE, data, size);
+    memcpy(m_rtpBuf + 4 + RTP_HEADER_SIZE, data, size);
     
     // Send via TCP (RTP-over-RTSP)
     if (m_TCPTransport && m_Client) {
-        socketsend(m_Client, (char*)rtpBuf, rtpPacketSize + 4);
+        socketsend(m_Client, (char*)m_rtpBuf, rtpPacketSize + 4);
     }
     // Note: UDP path would need additional implementation
 }

@@ -91,11 +91,12 @@ void ptz_init() {
     Serial.println("[INFO] PTZ Servos initialized.");
 }
 
-// x, y are -1.0 to 1.0 (ONVIF standard usually) or 0.0 to 1.0
-// We'll assume input 0.0 to 1.0 for absolute move
+// x, y are ONVIF standard -1.0 to 1.0 (full servo range).
+// Maps linearly to servo angles 0..180°.
 void ptz_set_absolute(float x, float y) {
-    int panAngle = (int)(x * 180.0f);
-    int tiltAngle = (int)(y * 180.0f);
+    // Convert ONVIF [-1, 1] range to servo [0°, 180°]
+    int panAngle  = (int)((x + 1.0f) / 2.0f * 180.0f);
+    int tiltAngle = (int)((y + 1.0f) / 2.0f * 180.0f);
     
     // Constrain
     if (panAngle < 0) panAngle = 0; if (panAngle > 180) panAngle = 180;

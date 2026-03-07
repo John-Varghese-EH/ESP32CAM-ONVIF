@@ -46,10 +46,10 @@ int CStreamer::SendRtpPacket(unsigned const char * jpeg, int jpegLen, int fragme
     bool includeQuantTbl = quant0tbl && quant1tbl && fragmentOffset == 0;
     uint8_t q = includeQuantTbl ? 128 : 0x5e;
 
-    static char RtpBuf[2048]; // Note: we assume single threaded, this large buf we keep off of the tiny stack
+    char * const RtpBuf = m_RtpBuf; // use per-instance buffer instead of shared static
     int RtpPacketSize = fragmentLen + KRtpHeaderSize + KJpegHeaderSize + (includeQuantTbl ? (4 + 64 * 2) : 0);
 
-    memset(RtpBuf,0x00,sizeof(RtpBuf));
+    memset(RtpBuf,0x00,sizeof(m_RtpBuf));
     // Prepare the first 4 byte of the packet. This is the Rtp over Rtsp header in case of TCP based transport
     RtpBuf[0]  = '$';        // magic number
     RtpBuf[1]  = 0;          // number of multiplexed subchannel on RTPS connection - here the RTP channel

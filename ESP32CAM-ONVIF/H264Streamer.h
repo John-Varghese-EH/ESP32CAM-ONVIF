@@ -55,6 +55,14 @@ private:
     uint8_t m_pps[64];
     size_t m_ppsSize;
     bool m_spsPpsValid;
+
+    // Per-instance RTP send buffer and sequence counter (avoids shared statics)
+    uint8_t m_rtpBuf[1600];
+    uint16_t m_sequenceNumber;
+
+    // Per-instance RTP timestamp state (avoids shared statics in streamImage)
+    uint32_t m_lastMsec;
+    uint32_t m_rtpTimestamp;
 };
 
 #else // VIDEO_CODEC_H264 not defined
