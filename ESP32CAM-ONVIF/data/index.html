@@ -6,11 +6,12 @@
   <title>ESP32-CAM ONVIF</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#000000">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Fonts: Using system font stack for offline reliability. Inter loaded async as enhancement -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"></noscript>
   <link rel="icon" href="data:,">
-  <!-- TensorFlow.js for Object Detection -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
+  <!-- TensorFlow.js: Loaded on-demand when AI Detection is enabled (not blocking page load) -->
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -58,7 +59,7 @@
     <!-- PANEL: DASHBOARD -->
     <div id="tab-dash" class="panel active">
       <div class="video-container glass-panel" id="vcont">
-        <img id="stream" class="video-feed" src="" alt="Connecting..." crossorigin="anonymous">
+        <img id="stream" class="video-feed" src="" alt="Connecting...">
         <div id="rec-toast" class="rec-toast">Recording Started</div>
 
         <!-- Stream Performance Overlay -->

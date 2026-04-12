@@ -247,7 +247,7 @@ def main():
     print(f"  Final:    {final:,} bytes")
     print(f"  Saved:    {saved:,} bytes ({pct:.1f}%)")
     print(f"{'='*50}")
-    print("\n[✓] Done!\n")
+    print("\n[+] Done!\n")
 
 
 if __name__ == "__main__":

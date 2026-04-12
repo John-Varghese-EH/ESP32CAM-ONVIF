@@ -102,7 +102,7 @@ const char TPL_STREAM_URI[] PROGMEM =
     "</trt:GetStreamUriResponse>"
     "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
 
-// Template for Dynamic Time
+// Template for Dynamic Time - timezone is now dynamic via %s
 const char PROGMEM TPL_TIME_FMT[] =
     "xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\" "
     "xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
@@ -110,13 +110,11 @@ const char PROGMEM TPL_TIME_FMT[] =
     "<tds:GetSystemDateAndTimeResponse>"
     "<tds:SystemDateAndTime>"
     "<tt:DateTimeType>NTP</tt:DateTimeType>"
-    "<tt:DaylightSavings>false</tt:DaylightSavings>"
-    "<tt:TimeZone><tt:TZ>IST-5:30</tt:TZ></tt:TimeZone>"
+    "<tt:DaylightSavings>%s</tt:DaylightSavings>"
+    "<tt:TimeZone><tt:TZ>%s</tt:TZ></tt:TimeZone>"
     "<tt:UTCDateTime>"
-    "<tt:Time><tt:Hour>%d</tt:Hour><tt:Minute>%d</tt:Minute><tt:Second>%d</"
-    "tt:Second></tt:Time>"
-    "<tt:Date><tt:Year>%d</tt:Year><tt:Month>%d</tt:Month><tt:Day>%d</tt:Day></"
-    "tt:Date>"
+    "<tt:Time><tt:Hour>%d</tt:Hour><tt:Minute>%d</tt:Minute><tt:Second>%d</tt:Second></tt:Time>"
+    "<tt:Date><tt:Year>%d</tt:Year><tt:Month>%d</tt:Month><tt:Day>%d</tt:Day></tt:Date>"
     "</tt:UTCDateTime>"
     "</tds:SystemDateAndTime>"
     "</tds:GetSystemDateAndTimeResponse>"
@@ -899,14 +897,31 @@ void handle_GetSystemDateAndTime() {
   time(&now);
   gmtime_r(&now, &timeinfo);
 
+  // Build POSIX timezone string from config.h GMT_OFFSET_SEC
+  // Format: UTC+/-HH:MM (POSIX sign is inverted: UTC-5 = EST5)
+  int offset_sec = GMT_OFFSET_SEC;
+  int offset_hours = offset_sec / 3600;
+  int offset_minutes = abs((offset_sec % 3600) / 60);
+  
+  char tz_str[32];
+  if (offset_minutes > 0) {
+    // e.g. IST-5:30 for UTC+5:30, CET-1 for UTC+1
+    snprintf(tz_str, sizeof(tz_str), "UTC%+d:%02d", -offset_hours, offset_minutes);
+  } else {
+    snprintf(tz_str, sizeof(tz_str), "UTC%+d", -offset_hours);
+  }
+
+  const char* dst_str = (DAYLIGHT_OFFSET > 0) ? "true" : "false";
+
   char *buffer = new char[1024];
   if (buffer) {
     snprintf_P(buffer, 1024, PART_HEADER);
     size_t len = strlen(buffer);
     // Note: tm_year is years since 1900, tm_mon is 0-11
-    snprintf_P(buffer + len, 1024 - len, TPL_TIME_FMT, timeinfo.tm_hour,
-               timeinfo.tm_min, timeinfo.tm_sec, timeinfo.tm_year + 1900,
-               timeinfo.tm_mon + 1, timeinfo.tm_mday);
+    snprintf_P(buffer + len, 1024 - len, TPL_TIME_FMT, 
+               dst_str, tz_str,
+               timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
+               timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday);
 
     onvifServer.send(200, "application/soap+xml", buffer);
     delete[] buffer;

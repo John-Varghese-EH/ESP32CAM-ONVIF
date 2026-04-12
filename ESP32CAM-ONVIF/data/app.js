@@ -1628,9 +1628,17 @@ const objectDetection = {
         if (this.model) return; // Already loaded
 
         this.isLoading = true;
-        showToast('Loading AI model...');
+        showToast('Loading AI model... (downloading ~4MB)');
 
         try {
+            // Lazy-load TensorFlow.js and COCO-SSD only when needed
+            if (typeof tf === 'undefined') {
+                await this._loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0');
+            }
+            if (typeof cocoSsd === 'undefined') {
+                await this._loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3');
+            }
+
             // Load COCO-SSD model
             this.model = await cocoSsd.load();
             showToast('AI model loaded! Press D to enable detection');
@@ -1640,9 +1648,19 @@ const objectDetection = {
             this.createOverlay();
         } catch (err) {
             console.error('Failed to load model:', err);
-            showToast('AI model failed to load');
+            showToast('AI model failed to load - check internet connection');
             this.isLoading = false;
         }
+    },
+
+    _loadScript(src) {
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('Failed to load: ' + src));
+            document.head.appendChild(script);
+        });
     },
 
     createOverlay() {
