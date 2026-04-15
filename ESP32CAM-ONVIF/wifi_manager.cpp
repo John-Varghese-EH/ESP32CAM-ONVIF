@@ -7,7 +7,7 @@
 // Global instance
 WiFiManager wifiManager;
 
-WiFiManager::WiFiManager() : _apMode(false), _scannedNetworksCount(0), _scannedNetworks(nullptr), _lastConnectAttempt(0), _lastConnectedTime(0) {
+WiFiManager::WiFiManager() : _apMode(false), _scannedNetworksCount(0), _lastConnectAttempt(0), _lastConnectedTime(0) {
 }
 
 void WiFiManager::loop() {
@@ -139,32 +139,29 @@ bool WiFiManager::isInAPMode() {
 }
 
 int WiFiManager::scanNetworks() {
-  // Free previous scan results
-  if (_scannedNetworks != nullptr) {
-    delete[] _scannedNetworks;
-    _scannedNetworks = nullptr;
-  }
-  
   Serial.println("[INFO] Scanning for networks...");
   
   // Scan for networks
   int found = WiFi.scanNetworks();
-  _scannedNetworksCount = found;
   
-  if (found > 0) {
-    // Allocate memory for network data
-    _scannedNetworks = new WiFiNetwork[found];
-    
-    // Store network details
-    for (int i = 0; i < found; i++) {
-      _scannedNetworks[i].ssid = WiFi.SSID(i);
+  // Cap at MAX_SCAN_NETWORKS to prevent excessive memory use
+  _scannedNetworksCount = (found > MAX_SCAN_NETWORKS) ? MAX_SCAN_NETWORKS : found;
+  
+  if (_scannedNetworksCount > 0) {
+    // Store network details into fixed array (no heap allocation)
+    for (int i = 0; i < _scannedNetworksCount; i++) {
+      strncpy(_scannedNetworks[i].ssid, WiFi.SSID(i).c_str(), sizeof(_scannedNetworks[i].ssid) - 1);
+      _scannedNetworks[i].ssid[sizeof(_scannedNetworks[i].ssid) - 1] = '\0';
       _scannedNetworks[i].rssi = WiFi.RSSI(i);
       _scannedNetworks[i].encType = WiFi.encryptionType(i);
     }
   }
   
-  Serial.printf("[INFO] Found %d networks\n", found);
-  return found;
+  // Free scan results from WiFi driver
+  WiFi.scanDelete();
+  
+  Serial.printf("[INFO] Found %d networks (showing %d)\n", found, _scannedNetworksCount);
+  return _scannedNetworksCount;
 }
 
 WiFiNetwork* WiFiManager::getScannedNetworks() {

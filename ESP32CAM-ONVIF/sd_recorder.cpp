@@ -50,6 +50,7 @@ File _recordFile;
 bool _isRecording = false;
 bool _manualRecording = false; // Flag for manual web trigger
 int _segmentCounter = 0;
+int _framesSinceFlush = 0;  // Track frames for periodic flush
 
 void manage_storage() {
     float total = SD_MMC.totalBytes();
@@ -166,23 +167,22 @@ void sd_recorder_loop() {
         if (!_isRecording) return; // Still failed
     }
 
-    // 3. Record Frame (Limit FPS to something reasonable, e.g., 5 FPS for background recording)
-    if (now - _lastRecordFrame > 200) { // 5 FPS
+    // 3. Record Frame (2 FPS for background recording — saves CPU vs 5 FPS)
+    if (now - _lastRecordFrame > 500) { // 500ms = 2 FPS
         camera_fb_t * fb = esp_camera_fb_get();
         if (!fb) return;
         
-        // Write MJPEG frame header + body
-        // MJPEG boundary
-        // We write raw JPEGs back to back. Some players need boundary headers, most VLC-like just play concatenated JPEGs.
-        // A generic MJPEG stream usually just needs the JPEG bytes.
-        
-        // OPTIMIZATION: Check available space in write buffer?
         if (_recordFile.write(fb->buf, fb->len) != fb->len) {
             Serial.println("[ERROR] Write failed. Disk full?");
             _recordFile.close();
             _isRecording = false;
         } else {
-            // Include flush occasionally? SD_MMC is buffered.
+            // Periodic flush every 10 frames to prevent data loss on power loss
+            _framesSinceFlush++;
+            if (_framesSinceFlush >= 10) {
+                _recordFile.flush();
+                _framesSinceFlush = 0;
+            }
         }
         
         esp_camera_fb_return(fb);

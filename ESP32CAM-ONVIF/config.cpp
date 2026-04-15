@@ -28,7 +28,7 @@ void loadSettings() {
     // defaults
     appSettings.btEnabled = false;
     appSettings.btStealthMode = false;
-    appSettings.btPresenceMac = "";
+    appSettings.btPresenceMac[0] = '\0';  // Empty MAC
     appSettings.btPresenceTimeout = 120;
     appSettings.btMicGain = 50;
     appSettings.hwMicGain = 50;
@@ -61,7 +61,7 @@ void loadSettings() {
 
     if(doc.containsKey("btEnabled")) appSettings.btEnabled = doc["btEnabled"];
     if(doc.containsKey("btStealth")) appSettings.btStealthMode = doc["btStealth"];
-    if(doc.containsKey("btMac"))     appSettings.btPresenceMac = doc["btMac"].as<String>();
+    if(doc.containsKey("btMac"))     strncpy(appSettings.btPresenceMac, doc["btMac"] | "", sizeof(appSettings.btPresenceMac) - 1);
     if(doc.containsKey("btTimeout")) appSettings.btPresenceTimeout = doc["btTimeout"];
     if(doc.containsKey("btGain"))    appSettings.btMicGain = doc["btGain"];
     if(doc.containsKey("hwGain"))    appSettings.hwMicGain = doc["hwGain"];
@@ -74,7 +74,7 @@ void saveSettings() {
     StaticJsonDocument<512> doc;
     doc["btEnabled"] = appSettings.btEnabled;
     doc["btStealth"] = appSettings.btStealthMode;
-    doc["btMac"]     = appSettings.btPresenceMac;
+    doc["btMac"]     = (const char*)appSettings.btPresenceMac;
     doc["btTimeout"] = appSettings.btPresenceTimeout;
     doc["btGain"]    = appSettings.btMicGain;
     doc["hwGain"]    = appSettings.hwMicGain;

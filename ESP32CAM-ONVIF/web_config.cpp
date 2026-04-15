@@ -31,7 +31,9 @@
 
 WebServer webConfigServer(WEB_PORT);
 
-// WEB_USER and WEB_PASS are defined in config.h
+// Shared JSON response buffer (single-threaded, reused across API handlers)
+// Eliminates heap fragmentation from String concatenation
+static char s_jsonBuf[1024];
 
 
 bool isAuthenticated(WebServer &server) {
@@ -59,20 +61,29 @@ void web_config_start() {
     // --- API ENDPOINTS ---
     webConfigServer.on("/api/status", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
-        String json = "{";
-        json += "\"status\":\"Online\",";
-        json += "\"rtsp\":\"" + getRTSPUrl() + "\",";
-        json += "\"onvif\":\"http://" + WiFi.localIP().toString() + ":" + String(ONVIF_PORT) + "/onvif/device_service\",";
-        json += "\"onvif_enabled\":" + String(onvif_is_enabled() ? "true" : "false") + ",";
-        json += "\"motion\":" + String(motion_detected() ? "true" : "false") + ",";
-        json += "\"recording\":" + String(sd_recorder_is_recording() ? "true" : "false") + ",";
-        json += "\"sd_mounted\":" + String(sd_recorder_is_mounted() ? "true" : "false") + ",";
-        json += "\"heap\":" + String(ESP.getFreeHeap()) + ",";
-        json += "\"uptime\":" + String(millis() / 1000) + ",";
-        json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
-        json += "\"autoflash\":" + String(auto_flash_is_enabled() ? "true" : "false");
-        json += "}";
-        webConfigServer.send(200, "application/json", json);
+        snprintf(s_jsonBuf, sizeof(s_jsonBuf),
+            "{\"status\":\"Online\","
+            "\"rtsp\":\"%s\","
+            "\"onvif\":\"http://%s:%d/onvif/device_service\","
+            "\"onvif_enabled\":%s,"
+            "\"motion\":%s,"
+            "\"recording\":%s,"
+            "\"sd_mounted\":%s,"
+            "\"heap\":%u,"
+            "\"uptime\":%lu,"
+            "\"rssi\":%d,"
+            "\"autoflash\":%s}",
+            getRTSPUrl().c_str(),
+            WiFi.localIP().toString().c_str(), ONVIF_PORT,
+            onvif_is_enabled() ? "true" : "false",
+            motion_detected() ? "true" : "false",
+            sd_recorder_is_recording() ? "true" : "false",
+            sd_recorder_is_mounted() ? "true" : "false",
+            ESP.getFreeHeap(),
+            millis() / 1000,
+            WiFi.RSSI(),
+            auto_flash_is_enabled() ? "true" : "false");
+        webConfigServer.send(200, "application/json", s_jsonBuf);
     });
 
     // --- Change Camera Settings ---
@@ -420,7 +431,7 @@ void web_config_start() {
         json += ",\"bluetooth\":{";
         json += "\"enabled\":" + String(appSettings.btEnabled ? "true" : "false") + ",";
         json += "\"stealth\":" + String(appSettings.btStealthMode ? "true" : "false") + ",";
-        json += "\"mac\":\"" + appSettings.btPresenceMac + "\",";
+        json += "\"mac\":\"" + String(appSettings.btPresenceMac) + "\",";
         json += "\"timeout\":" + String(appSettings.btPresenceTimeout) + ",";
         json += "\"gain\":" + String(appSettings.btMicGain) + ",";
         json += "\"audioSource\":" + String(appSettings.audioSource);
@@ -477,7 +488,7 @@ void web_config_start() {
             JsonObject bt = doc["bluetooth"];
             if (bt.containsKey("enabled")) appSettings.btEnabled = bt["enabled"];
             if (bt.containsKey("stealth")) appSettings.btStealthMode = bt["stealth"];
-            if (bt.containsKey("mac")) appSettings.btPresenceMac = bt["mac"].as<String>();
+            if (bt.containsKey("mac")) strncpy(appSettings.btPresenceMac, bt["mac"] | "", sizeof(appSettings.btPresenceMac) - 1);
             if (bt.containsKey("timeout")) appSettings.btPresenceTimeout = bt["timeout"];
             if (bt.containsKey("gain")) appSettings.btMicGain = bt["gain"];
             if (bt.containsKey("audioSource")) appSettings.audioSource = (AudioSource)bt["audioSource"].as<int>();
@@ -590,21 +601,23 @@ void web_config_start() {
     });
 
     // ==================== EVENT LOG ====================
-    #define MAX_EVENTS 100
+    #define MAX_EVENTS 50
     struct LogEvent {
         unsigned long timestamp;
-        String type;
-        String message;
+        char type[12];       // "boot", "motion", "error", etc. (was heap-allocated String)
+        char message[64];    // Fixed buffer, no heap fragmentation (was heap-allocated String)
     };
     static LogEvent eventLog[MAX_EVENTS];
     static int eventCount = 0;
     static int eventIndex = 0;
     
     // Helper to add event
-    auto addEvent = [](String type, String message) {
+    auto addEvent = [](const char* type, const char* message) {
         eventLog[eventIndex].timestamp = millis();
-        eventLog[eventIndex].type = type;
-        eventLog[eventIndex].message = message;
+        strncpy(eventLog[eventIndex].type, type, sizeof(eventLog[eventIndex].type) - 1);
+        eventLog[eventIndex].type[sizeof(eventLog[eventIndex].type) - 1] = '\0';
+        strncpy(eventLog[eventIndex].message, message, sizeof(eventLog[eventIndex].message) - 1);
+        eventLog[eventIndex].message[sizeof(eventLog[eventIndex].message) - 1] = '\0';
         eventIndex = (eventIndex + 1) % MAX_EVENTS;
         if (eventCount < MAX_EVENTS) eventCount++;
     };
@@ -715,15 +728,10 @@ void web_config_start() {
     // --- Ping Test ---
     webConfigServer.on("/api/network/ping", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
-        
-        unsigned long timestamp = millis();
-        String json = "{";
-        json += "\"timestamp\":" + String(timestamp) + ",";
-        json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
-        json += "\"ip\":\"" + WiFi.localIP().toString() + "\"";
-        json += "}";
-        
-        webConfigServer.send(200, "application/json", json);
+        snprintf(s_jsonBuf, sizeof(s_jsonBuf),
+            "{\"timestamp\":%lu,\"rssi\":%d,\"ip\":\"%s\"}",
+            millis(), WiFi.RSSI(), WiFi.localIP().toString().c_str());
+        webConfigServer.send(200, "application/json", s_jsonBuf);
     });
     
     // --- Bandwidth Test ---
@@ -787,15 +795,13 @@ void web_config_start() {
     // --- WiFi API Endpoints ---
     webConfigServer.on("/api/wifi/status", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
-        
-        String json = "{";
-        json += "\"connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
-        json += "\"ssid\":\"" + wifiManager.getSSID() + "\",";
-        json += "\"ip\":\"" + wifiManager.getLocalIP().toString() + "\",";
-        json += "\"mode\":\"" + String(wifiManager.isInAPMode() ? "AP" : "STA") + "\"";
-        json += "}";
-        
-        webConfigServer.send(200, "application/json", json);
+        snprintf(s_jsonBuf, sizeof(s_jsonBuf),
+            "{\"connected\":%s,\"ssid\":\"%s\",\"ip\":\"%s\",\"mode\":\"%s\"}",
+            WiFi.status() == WL_CONNECTED ? "true" : "false",
+            wifiManager.getSSID().c_str(),
+            wifiManager.getLocalIP().toString().c_str(),
+            wifiManager.isInAPMode() ? "AP" : "STA");
+        webConfigServer.send(200, "application/json", s_jsonBuf);
     });
     
     webConfigServer.on("/api/wifi/scan", HTTP_GET, []() {
@@ -808,7 +814,7 @@ void web_config_start() {
         for (int i = 0; i < networksFound; i++) {
             if (i > 0) json += ",";
             json += "{";
-            json += "\"ssid\":\"" + networks[i].ssid + "\",";
+            json += "\"ssid\":\"" + String(networks[i].ssid) + "\",";
             json += "\"rssi\":" + String(networks[i].rssi) + ",";
             json += "\"encType\":" + String(networks[i].encType);
             json += "}";
@@ -946,7 +952,7 @@ void web_config_start() {
         String json = "{";
         json += "\"enabled\":" + String(appSettings.btEnabled ? "true" : "false") + ",";
         json += "\"stealth\":" + String(appSettings.btStealthMode ? "true" : "false") + ",";
-        json += "\"mac\":\"" + appSettings.btPresenceMac + "\",";
+        json += "\"mac\":\"" + String(appSettings.btPresenceMac) + "\",";
         json += "\"userPresent\":" + String(btManager.isUserPresent() ? "true" : "false") + ",";
         json += "\"audioSource\":" + String(appSettings.audioSource) + ",";
         json += "\"gain\":" + String(appSettings.btMicGain) + ",";
@@ -966,7 +972,7 @@ void web_config_start() {
         
         if(doc.containsKey("enabled")) appSettings.btEnabled = doc["enabled"];
         if(doc.containsKey("stealth")) appSettings.btStealthMode = doc["stealth"];
-        if(doc.containsKey("mac")) appSettings.btPresenceMac = doc["mac"].as<String>();
+        if(doc.containsKey("mac")) strncpy(appSettings.btPresenceMac, doc["mac"] | "", sizeof(appSettings.btPresenceMac) - 1);
         if(doc.containsKey("gain")) appSettings.btMicGain = doc["gain"];
         if(doc.containsKey("timeout")) appSettings.btPresenceTimeout = doc["timeout"];
         if(doc.containsKey("audioSource")) {

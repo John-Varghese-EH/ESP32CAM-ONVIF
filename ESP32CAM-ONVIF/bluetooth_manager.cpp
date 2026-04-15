@@ -91,7 +91,7 @@ void BluetoothManager::startScan() {
         
         _scanResultsJSON = "[";
         bool foundUser = false;
-        String target = appSettings.btPresenceMac;
+        String target = String(appSettings.btPresenceMac);
         target.toUpperCase();
 
         for(int i=0; i<results.getCount(); i++) {
@@ -124,7 +124,7 @@ void BluetoothManager::startScan() {
         
         _scanResultsJSON = "[";
         bool foundUser = false;
-        String target = appSettings.btPresenceMac;
+        String target = String(appSettings.btPresenceMac);
         target.toUpperCase();
 
         for(int i=0; i<foundDevices->getCount(); i++) {
@@ -165,7 +165,7 @@ void BluetoothManager::startScan() {
 }
 
 bool BluetoothManager::isUserPresent() {
-    if (!appSettings.btPresenceMac.length()) return true; 
+    if (strlen(appSettings.btPresenceMac) == 0) return true; 
     return _userPresent;
 }
 

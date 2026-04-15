@@ -34,9 +34,10 @@ bool camera_init() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
+  config.grab_mode = CAMERA_GRAB_LATEST; // Always grab freshest frame, discard stale
   if(psramFound()){
     config.frame_size = FRAMESIZE_VGA; // 640x480 - Rock Solid Stability for NVRs
-    config.jpeg_quality = 12;          // High quality (lower num)
+    config.jpeg_quality = 10;          // Optimized: slightly smaller frames, negligible quality loss
     config.fb_count = 2;
     Serial.println(F("[INFO] PSRAM found. Using VGA (640x480) and 2 Frame Buffers"));
   } else {

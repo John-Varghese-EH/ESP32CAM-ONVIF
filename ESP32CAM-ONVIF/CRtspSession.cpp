@@ -3,6 +3,12 @@
 #include <time.h>
 #include "esp_camera.h"
 
+// Shared RTSP response buffer — single-threaded, no concurrency risk.
+// Consolidates ~4KB of per-function static buffers into one.
+static char s_RtspResponse[1024];
+static char s_RtspSDP[1024];
+static char s_RtspURL[256];
+
 CRtspSession::CRtspSession(SOCKET aRtspClient, CStreamer * aStreamer) : m_RtspClient(aRtspClient),m_Streamer(aStreamer)
 {
     printf("Creating RTSP session\n");
@@ -239,21 +245,16 @@ RTSP_CMD_TYPES CRtspSession::Handle_RtspRequest(char const * aRequest, unsigned 
 
 void CRtspSession::Handle_RtspOPTION()
 {
-    static char Response[1024]; // Note: we assume single threaded, this large buf we keep off of the tiny stack
-
-    snprintf(Response,sizeof(Response),
+    snprintf(s_RtspResponse,sizeof(s_RtspResponse),
              "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
              "Public: DESCRIBE, SETUP, TEARDOWN, PLAY, GET_PARAMETER\r\n\r\n",m_CSeq);
 
-    socketsend(m_RtspClient,Response,strlen(Response));
+    socketsend(m_RtspClient,s_RtspResponse,strlen(s_RtspResponse));
 }
 
 void CRtspSession::Handle_RtspDESCRIBE()
 {
-    static char Response[1024]; // Note: we assume single threaded, this large buf we keep off of the tiny stack
-    static char SDPBuf[1024];
-    static char URLBuf[1024];
-
+    // Reuse shared buffers (single-threaded)
     // check whether we know a stream with the URL which is requested
     m_StreamID = -1;        // invalid URL
     
@@ -277,7 +278,7 @@ void CRtspSession::Handle_RtspDESCRIBE()
         return;
     };
 
-    // simulate DESCRIBE server response
+    // Build search tag in stack buffer
     static char OBuf[256];
     char * ColonPtr;
     strcpy(OBuf,m_URLHostPort);
@@ -297,7 +298,7 @@ void CRtspSession::Handle_RtspDESCRIBE()
     
     if (useH264) {
         // H.264 SDP (RTP payload type 96 - dynamic)
-        snprintf(SDPBuf,sizeof(SDPBuf),
+        snprintf(s_RtspSDP,sizeof(s_RtspSDP),
                  "v=0\r\n"
                  "o=- %d 1 IN IP4 %s\r\n"
                  "s=ESP32-CAM H.264 Stream\r\n"
@@ -318,7 +319,7 @@ void CRtspSession::Handle_RtspDESCRIBE()
                  OBuf);
     } else {
         // MJPEG SDP (RTP payload type 26)
-        snprintf(SDPBuf,sizeof(SDPBuf),
+        snprintf(s_RtspSDP,sizeof(s_RtspSDP),
                  "v=0\r\n"
                  "o=- %d 1 IN IP4 %s\r\n"
                  "s=ESP32-CAM RTSP Stream\r\n"
@@ -350,11 +351,11 @@ void CRtspSession::Handle_RtspDESCRIBE()
     case 3: strcpy(StreamName,"h264/2"); break;
     default: strcpy(StreamName,"1"); break;
     };
-    snprintf(URLBuf,sizeof(URLBuf),
+    snprintf(s_RtspURL,sizeof(s_RtspURL),
              "rtsp://%s/%s",
              m_URLHostPort,
              StreamName);
-    snprintf(Response,sizeof(Response),
+    snprintf(s_RtspResponse,sizeof(s_RtspResponse),
              "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
              "%s\r\n"
              "Content-Base: %s/\r\n"
@@ -363,16 +364,15 @@ void CRtspSession::Handle_RtspDESCRIBE()
              "%s",
              m_CSeq,
              DateHeader(),
-             URLBuf,
-             (int) strlen(SDPBuf),
-             SDPBuf);
+             s_RtspURL,
+             (int) strlen(s_RtspSDP),
+             s_RtspSDP);
 
-    socketsend(m_RtspClient,Response,strlen(Response));
+    socketsend(m_RtspClient,s_RtspResponse,strlen(s_RtspResponse));
 }
 
 void CRtspSession::Handle_RtspSETUP()
 {
-    static char Response[1024];
     static char Transport[255];
 
     // init RTP streamer transport type (UDP or TCP) and ports for UDP transport
@@ -393,7 +393,7 @@ void CRtspSession::Handle_RtspSETUP()
                  m_ClientRTCPPort,
                  m_Streamer ? m_Streamer->GetRtpServerPort() : 0,
                  m_Streamer ? m_Streamer->GetRtcpServerPort() : 0);
-    snprintf(Response,sizeof(Response),
+    snprintf(s_RtspResponse,sizeof(s_RtspResponse),
              "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
              "%s\r\n"
              "Transport: %s\r\n"
@@ -403,12 +403,11 @@ void CRtspSession::Handle_RtspSETUP()
              Transport,
              m_RtspSessionID);
 
-    socketsend(m_RtspClient,Response,strlen(Response));
+    socketsend(m_RtspClient,s_RtspResponse,strlen(s_RtspResponse));
 }
 
 void CRtspSession::Handle_RtspPLAY()
 {
-    static char Response[1024];
 
     // Build stream path from the persisted m_StreamID set during DESCRIBE
     char StreamPath[64];
@@ -423,7 +422,7 @@ void CRtspSession::Handle_RtspPLAY()
 
     // m_URLHostPort already contains "host:port" from the parsed RTSP URL;
     // do not append an additional hardcoded port.
-    snprintf(Response,sizeof(Response),
+    snprintf(s_RtspResponse,sizeof(s_RtspResponse),
              "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
              "%s\r\n"
              "Range: npt=0.000-\r\n"
@@ -435,7 +434,7 @@ void CRtspSession::Handle_RtspPLAY()
              m_URLHostPort,
              StreamPath);
 
-    socketsend(m_RtspClient,Response,strlen(Response));
+    socketsend(m_RtspClient,s_RtspResponse,strlen(s_RtspResponse));
 }
 
 char const * CRtspSession::DateHeader()
@@ -453,16 +452,14 @@ int CRtspSession::GetStreamID()
 
 void CRtspSession::Handle_RtspGET_PARAMETER()
 {
-    static char Response[1024];
-
     // GET_PARAMETER response used for Keep-Alive/Heartbeat
-    snprintf(Response,sizeof(Response),
+    snprintf(s_RtspResponse,sizeof(s_RtspResponse),
              "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
              "Session: %i\r\n\r\n",
              m_CSeq,
              m_RtspSessionID);
 
-    socketsend(m_RtspClient,Response,strlen(Response));
+    socketsend(m_RtspClient,s_RtspResponse,strlen(s_RtspResponse));
 }
 
 

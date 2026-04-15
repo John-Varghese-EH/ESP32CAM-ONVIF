@@ -108,24 +108,33 @@ void setup() {
 void loop() {
   // Feed Watchdog
   esp_task_wdt_reset();
+  uint32_t now = millis();
   
-  // Critical Loops (Keep minimal blocking)
+  // === HIGH PRIORITY — every cycle (~0ms target latency) ===
   rtsp_server_loop();   // Highest priority for streaming
-  wifiManager.loop();   // Connectivity
   web_config_loop();    // Web UI
-  onvif_server_loop();  // Discovery/SOAP
   
-  // Background Tasks
-  motion_detection_loop();
-  sd_recorder_loop();
-  serial_console_loop();
-  auto_flash_loop();
-  status_led_loop();
-  #ifdef BLUETOOTH_ENABLED
-    btManager.loop();
-  #endif
+  // === MEDIUM PRIORITY — every 100ms ===
+  static uint32_t lastMedium = 0;
+  if (now - lastMedium > 100) {
+      lastMedium = now;
+      wifiManager.loop();   // Connectivity
+      onvif_server_loop();  // Discovery/SOAP
+  }
   
-  // Optional: Power saving delay if NO clients connected? 
-  // For RTSP low latency, we usually avoid delay, but a yield() helps watchdog.
-  yield(); 
+  // === LOW PRIORITY — every 500ms ===
+  static uint32_t lastLow = 0;
+  if (now - lastLow > 500) {
+      lastLow = now;
+      motion_detection_loop();
+      sd_recorder_loop();
+      serial_console_loop();
+      auto_flash_loop();
+      status_led_loop();
+      #ifdef BLUETOOTH_ENABLED
+        btManager.loop();
+      #endif
+  }
+  
+  yield();
 }

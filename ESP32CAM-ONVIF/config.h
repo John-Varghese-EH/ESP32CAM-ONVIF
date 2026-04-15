@@ -278,7 +278,7 @@ enum AudioSource {
 struct AppSettings {
     bool btEnabled;
     bool btStealthMode;
-    String btPresenceMac;
+    char btPresenceMac[18];    // "AA:BB:CC:DD:EE:FF" + null = 18 bytes (was heap-allocated String)
     int btPresenceTimeout;      // Seconds
     int btMicGain;             // 0-100
     int hwMicGain;             // 0-100
