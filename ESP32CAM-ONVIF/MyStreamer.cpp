@@ -1,15 +1,21 @@
 // MyStreamer.cpp
 #include "MyStreamer.h"
 
-// The `resolution` array is a standard part of the esp32-camera driver component.
-// It maps the framesize enum to width and height.
-extern "C" {
-    #include "ll_cam.h"
+// Safe helper to get camera resolution without relying on external arrays
+static int getCamWidth() {
+    sensor_t *s = esp_camera_sensor_get();
+    if (s && s->status.framesize == FRAMESIZE_VGA) return 640;
+    return 640; // Default fallback
 }
 
-MyStreamer::MyStreamer() : CStreamer(NULL, resolution[esp_camera_sensor_get()->status.framesize].width, resolution[esp_camera_sensor_get()->status.framesize].height) {
-    // The CStreamer base class constructor needs the image width and height.
-    // We get it from the currently configured camera sensor.
+static int getCamHeight() {
+    sensor_t *s = esp_camera_sensor_get();
+    if (s && s->status.framesize == FRAMESIZE_VGA) return 480;
+    return 480; // Default fallback
+}
+
+MyStreamer::MyStreamer() : CStreamer(NULL, getCamWidth(), getCamHeight()) {
+    // We initialize CStreamer with the known width/height.
 }
 
 void MyStreamer::streamImage(uint32_t curMsec) {

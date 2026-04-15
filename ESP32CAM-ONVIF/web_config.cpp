@@ -900,13 +900,25 @@ void web_config_start() {
             
             size_t dataLen = fb->len; // Cache before releasing!
             size_t hlen = client.printf("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n", dataLen);
-            size_t wlen = client.write(fb->buf, dataLen);
+            
+            // Implement chunked write to prevent WiFiClient buffer drops on large frames
+            size_t wlen = 0;
+            const size_t chunkSize = 2048;
+            for (size_t i = 0; i < dataLen; i += chunkSize) {
+                size_t toWrite = (dataLen - i < chunkSize) ? (dataLen - i) : chunkSize;
+                size_t written = client.write(fb->buf + i, toWrite);
+                if (written != toWrite) {
+                    break;
+                }
+                wlen += written;
+            }
+            
             client.print("\r\n");
             
             esp_camera_fb_return(fb); // Release immediately
             
             if (wlen != dataLen) {
-                 Serial.println("[WARN] Stream write failed (Client disconnected?)");
+                 Serial.printf("[WARN] Stream write failed (Sent %u of %u bytes). Client disconnected?\n", wlen, dataLen);
                  break;
             }
         }
