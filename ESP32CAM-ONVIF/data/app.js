@@ -41,6 +41,8 @@ function showToast(msg) {
 }
 
 // ==================== TABS ====================
+let _aiPreviewInterval = null;
+
 function setTab(id, event) {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -52,6 +54,24 @@ function setTab(id, event) {
     if (id === 'sys') { updateSystemInfo(); updateSDInfo(); }
     if (id === 'events') updateEventLog();
     if (id === 'recordings') loadRecordings();
+    
+    // Handle AI Vision Tab Preview (runs a 1.5s refresh snapshot to save stream sockets)
+    const aiLive = el('ai-live-preview');
+    if (aiLive) {
+        if (id === 'ai') {
+            if (!_aiPreviewInterval) {
+                aiLive.src = `/snapshot?_cb=${Date.now()}`;
+                _aiPreviewInterval = setInterval(() => {
+                    aiLive.src = `/snapshot?_cb=${Date.now()}`;
+                }, 1500);
+            }
+        } else {
+            if (_aiPreviewInterval) {
+                clearInterval(_aiPreviewInterval);
+                _aiPreviewInterval = null;
+            }
+        }
+    }
 }
 
 // ==================== STREAM PERFORMANCE = MONITOR ====================
@@ -196,17 +216,9 @@ async function startClientRecord() {
     const targetFPS = 10;
     recStream = recCanvas.captureStream(targetFPS);
 
-    // Try to capture microphone audio and merge into recording
-    try {
-        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        audioStream.getAudioTracks().forEach(track => {
-            recStream.addTrack(track);
-            console.log('[REC] Microphone audio added:', track.label);
-        });
-        showToast("Recording with audio 🎤");
-    } catch (audioErr) {
-        console.log('[REC] No microphone available or denied, recording video only');
-    }
+    // Audio is typically served via RTSP/ONVIF directly from ESP32.
+    // Client-side recording will capture video feed only.
+    console.log('[REC] Recording video without local microphone audio');
 
     // Draw frames onto canvas at fixed interval
     // Strategy: draw the live <img> element which is continuously updated by MJPEG
@@ -693,6 +705,54 @@ function ptzControl(action) {
 
 function ptzMove(pan, tilt) {
     api('/api/ptz/control', { method: 'POST', body: JSON.stringify({ pan, tilt }) });
+}
+
+let currentHardwarePan = 0;
+let currentHardwareTilt = 0;
+
+function ptzStep(axis, dir) {
+    const stepInput = el('ptz-step-size');
+    const stepSize = stepInput ? parseInt(stepInput.value) || 5 : 5;
+    
+    if (axis === 'pan') {
+       currentHardwarePan += dir * stepSize;
+       if(currentHardwarePan > 90) currentHardwarePan = 90;
+       if(currentHardwarePan < -90) currentHardwarePan = -90;
+    } else {
+       currentHardwareTilt += dir * stepSize;
+       if(currentHardwareTilt > 45) currentHardwareTilt = 45;
+       if(currentHardwareTilt < -45) currentHardwareTilt = -45;
+    }
+    ptzMove(currentHardwarePan, currentHardwareTilt);
+}
+
+function ptzHome() {
+    currentHardwarePan = 0; currentHardwareTilt = 0;
+    ptzControl('home');
+}
+
+let _patrolInterval = null;
+let _patrolDir = 1; // 1 for right, -1 for left
+function togglePatrol() {
+    const btn = el('btn-ptz-patrol');
+    if (_patrolInterval) {
+        clearInterval(_patrolInterval);
+        _patrolInterval = null;
+        btn.innerText = 'Start Patrol Sweep';
+        btn.classList.remove('btn-danger');
+        btn.classList.add('btn-primary');
+    } else {
+        btn.innerText = 'Stop Patrol Sweep';
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-danger');
+        ptzHome(); // Reset to center before starting
+        _patrolInterval = setInterval(() => {
+            // Check bounds to reverse direction
+            if (currentHardwarePan >= 90) _patrolDir = -1;
+            if (currentHardwarePan <= -90) _patrolDir = 1;
+            ptzStep('pan', _patrolDir);
+        }, 2000); // Step every 2 seconds
+    }
 }
 
 // ==================== SETTINGS EXPORT / IMPORT ====================
@@ -1376,28 +1436,7 @@ function closeShortcutsHelp() {
 }
 
 // ==================== 3. PICTURE-IN-PICTURE ====================
-async function togglePiP() {
-    const video = el('stream');
-
-    try {
-        if (document.pictureInPictureElement) {
-            await document.exitPictureInPicture();
-            showToast('PiP disabled');
-        } else {
-            // Create video element from image stream
-            const videoEl = document.createElement('video');
-            videoEl.src = video.src;
-            videoEl.autoplay = true;
-            videoEl.muted = true;
-
-            await videoEl.requestPictureInPicture();
-            showToast('PiP enabled');
-        }
-    } catch (err) {
-        console.error('PiP failed:', err);
-        showToast('PiP not supported');
-    }
-}
+// Note: PiP function moved to Advanced Features section below.
 
 // ==================== 4. VIDEO FILTERS ====================
 const videoFilters = {
@@ -1825,6 +1864,80 @@ function initClientSideFeatures() {
 }
 
 // ==================== 10. OBJECT DETECTION (AI) ====================
+let _isPtzTracking = false;
+let _lastPtzTrackTime = 0;
+function togglePtzTracking(enabled) {
+    _isPtzTracking = enabled;
+    // Sync both checkboxes
+    if(el('ai-ptz-tracking')) el('ai-ptz-tracking').checked = enabled;
+    if(el('ai-ptz-tracking-ai-tab')) el('ai-ptz-tracking-ai-tab').checked = enabled;
+    if(enabled) {
+        if (!objectDetection.isEnabled) {
+            objectDetection.toggle(); // Turn on AI if it's off!
+        }
+        showToast('Human Auto-Tracking Enabled');
+    }
+}
+
+// ==================== GOOGLE DRIVE SYNC ====================
+async function syncToGoogleDrive() {
+    const token = localStorage.getItem('gdrive_token');
+    const statusEl = el('gdrive-status');
+    if (!token) {
+        showToast('Please enter Google Drive OAuth Access Token first');
+        return;
+    }
+    
+    statusEl.innerHTML = '<span class="ai-loading"></span> Fetching local recordings...';
+    try {
+        // Get list of recordings
+        const res = await fetch('/api/recordings');
+        const data = await res.json();
+        if(!data.files || data.files.length === 0) {
+            statusEl.innerText = 'No recordings found to sync.';
+            return;
+        }
+        statusEl.innerHTML = `<span class="ai-loading"></span> Found ${data.files.length} files. Starting upload...`;
+        
+        let successCount = 0;
+        for (let file of data.files) {
+            statusEl.innerHTML = `<span class="ai-loading"></span> Uploading ${file.n} (${(file.s/1024/1024).toFixed(2)} MB)...`;
+            
+            // Download from ESP32 locally to browser RAM
+            const videoBlobResp = await fetch(`/api/recordings/stream?file=${file.n}`);
+            const videoBlob = await videoBlobResp.blob();
+            
+            // Generate Google Drive Multipart Form Data
+            const metadata = {
+                name: file.n,
+                mimeType: 'video/mp4'
+            };
+            const form = new FormData();
+            form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+            form.append('file', videoBlob);
+            
+            // Upload to Google Drive using Browser Resources
+            const driveUploadReq = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + token
+                },
+                body: form
+            });
+            
+            if (driveUploadReq.ok) {
+                successCount++;
+            } else {
+                const errtxt = await driveUploadReq.text();
+                throw new Error('Upload failed: ' + errtxt);
+            }
+        }
+        statusEl.innerHTML = `✅ Successfully synced ${successCount} files!`;
+    } catch(err) {
+        statusEl.innerHTML = `<span style="color:var(--danger)">Error: ${err.message}</span>`;
+    }
+}
+
 const objectDetection = {
     model: null,
     isEnabled: false,
@@ -1894,13 +2007,16 @@ const objectDetection = {
 
         // Update button UI
         const btn = el('btn-detection');
+        const btnAi = el('btn-detection-ai-tab');
         if (btn) {
             if (this.isEnabled) {
                 btn.innerText = '🤖 Disable AI Detection';
                 btn.style.background = '#ef4444'; // Red when active
+                if(btnAi) { btnAi.innerText = '🤖 Disable AI Detection'; btnAi.style.background = '#ef4444'; }
             } else {
                 btn.innerText = '🤖 Enable AI Detection';
                 btn.style.background = ''; // Reset to primary
+                if(btnAi) { btnAi.innerText = '🤖 Enable AI Detection'; btnAi.style.background = ''; }
             }
         }
 
@@ -1940,8 +2056,13 @@ const objectDetection = {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
                 // Draw detections
+                let trackBox = null;
                 predictions.forEach(prediction => {
                     const [x, y, width, height] = prediction.bbox;
+                    
+                    if (prediction.class === 'person' && _isPtzTracking) {
+                        trackBox = { x, y, w: width, h: height };
+                    }
 
                     // Scale coordinates to canvas size
                     const scaleX = canvas.width / img.naturalWidth;
@@ -2017,9 +2138,88 @@ const objectDetection = {
                     ctx.fillText(label, scaledX + 8, scaledY - 9);
                 });
 
-                // Update detection count
-                if (el('detection-count')) {
-                    el('detection-count').innerText = predictions.length + ' objects';
+                // PTZ Auto-Tracking Engine
+                if (_isPtzTracking && trackBox) {
+                    const now = Date.now();
+                    // Throttle to 2000ms minimum between moves to prevent ESP32 crash/spikes!
+                    if (now - _lastPtzTrackTime > 2000) {
+                        const imgWidth = canvas.width;
+                        const centerX = trackBox.x + (trackBox.w / 2);
+                        const scaledCenterX = centerX * (canvas.width / img.naturalWidth);
+                        
+                        let didMove = false;
+                        if (scaledCenterX < imgWidth * 0.35) {
+                            // Subject is heavily on the left
+                            ptzStep('pan', 1);
+                            didMove = true;
+                        } else if (scaledCenterX > imgWidth * 0.65) {
+                            // Subject is heavily on the right
+                            ptzStep('pan', -1);
+                            didMove = true;
+                        }
+                        
+                        if (didMove) {
+                            _lastPtzTrackTime = now;
+                        }
+                    }
+                }
+
+                // Update detection count + object names
+                const objNames = predictions.map(p => `${p.class} ${(p.score*100).toFixed(0)}%`);
+                const uniqueClasses = [...new Set(predictions.map(p => p.class))];
+                const countText = predictions.length + ' objects';
+                const listText = uniqueClasses.length > 0 ? uniqueClasses.join(', ') : '';
+                
+                if (el('detection-count')) el('detection-count').innerText = countText;
+                if (el('ai-tab-detection-count')) el('ai-tab-detection-count').innerText = countText;
+                
+                // Show detailed list in Dashboard
+                const dashList = el('detection-objects-list');
+                if (dashList) {
+                    if (objNames.length > 0) {
+                        dashList.style.display = 'block';
+                        dashList.innerHTML = objNames.map(n => `<span style="display:inline-block;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:4px;padding:2px 6px;margin:2px;font-size:0.75rem;">${n}</span>`).join('');
+                    } else {
+                        dashList.style.display = 'none';
+                        dashList.innerHTML = '';
+                    }
+                }
+                // Show in AI tab
+                const aiList = el('ai-tab-detection-list');
+                if (aiList) {
+                    if (objNames.length > 0) {
+                        aiList.style.display = 'block';
+                        aiList.innerHTML = objNames.map(n => `<span style="display:inline-block;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:4px;padding:2px 6px;margin:2px;font-size:0.75rem;">${n}</span>`).join('');
+                    } else {
+                        aiList.style.display = 'none';
+                        aiList.innerHTML = '';
+                    }
+                }
+
+                // AI Tab specific Canvas drawing
+                const aiCanvas = el('ai-live-detection-canvas');
+                if (aiCanvas && el('tab-ai').classList.contains('active')) {
+                    const aiPreview = el('ai-live-preview');
+                    if (aiPreview && aiPreview.naturalWidth > 0) {
+                        aiCanvas.width = aiPreview.clientWidth;
+                        aiCanvas.height = aiPreview.clientHeight;
+                        const aiCtx = aiCanvas.getContext('2d');
+                        aiCtx.clearRect(0, 0, aiCanvas.width, aiCanvas.height);
+                        
+                        predictions.forEach(prediction => {
+                            const [bx, by, bw, bh] = prediction.bbox;
+                            const sx = aiCanvas.width / aiPreview.naturalWidth;
+                            const sy = aiCanvas.height / aiPreview.naturalHeight;
+                            
+                            aiCtx.lineWidth = 2;
+                            aiCtx.strokeStyle = '#10b981';
+                            aiCtx.strokeRect(bx * sx, by * sy, bw * sx, bh * sy);
+                            
+                            aiCtx.fillStyle = '#10b981';
+                            aiCtx.font = '12px Inter, sans-serif';
+                            aiCtx.fillText(`${prediction.class} ${(prediction.score * 100).toFixed(0)}%`, bx * sx + 4, by * sy - 4);
+                        });
+                    }
                 }
 
             } catch (err) {
@@ -2408,12 +2608,19 @@ async function togglePiP() {
         return;
     }
 
+    const img = el('stream');
+    if (!img || img.naturalWidth === 0) {
+        showToast("Stream must be playing first!");
+        return;
+    }
+
     if (!pipVideo) {
         pipCanvas = document.createElement('canvas');
         pipCtx = pipCanvas.getContext('2d');
         pipVideo = document.createElement('video');
         pipVideo.muted = true;
         pipVideo.autoplay = true;
+        pipVideo.playsInline = true;
         
         // Listeners to clean up loop
         pipVideo.addEventListener('leavepictureinpicture', () => {
@@ -2421,19 +2628,20 @@ async function togglePiP() {
             pipVideo.pause();
         });
     }
-
-    const img = el('stream');
-    if (img.naturalWidth === 0) {
-        showToast("Stream must be playing first!");
-        return;
-    }
     
     pipCanvas.width = img.naturalWidth || 640;
     pipCanvas.height = img.naturalHeight || 480;
-    pipVideo.srcObject = pipCanvas.captureStream(15);
-    await pipVideo.play();
+    
+    if ("captureStream" in pipCanvas) {
+        pipVideo.srcObject = pipCanvas.captureStream(15);
+    } else if ("mozCaptureStream" in pipCanvas) {
+        pipVideo.srcObject = pipCanvas.mozCaptureStream(15);
+    }
 
-    // Start drawing loop for PiP
+    // CRITICAL FIX: Start drawing loop for PiP before awaiting play()
+    if (pipInterval) clearInterval(pipInterval);
+    pipCtx.drawImage(img, 0, 0, pipCanvas.width, pipCanvas.height);
+    
     pipInterval = setInterval(() => {
         if (img.complete && img.naturalWidth > 0) {
             pipCtx.drawImage(img, 0, 0, pipCanvas.width, pipCanvas.height);
@@ -2441,6 +2649,7 @@ async function togglePiP() {
     }, 1000 / 15);
 
     try {
+        await pipVideo.play();
         await pipVideo.requestPictureInPicture();
         showToast("Picture in Picture Started 🔲");
     } catch (e) {
