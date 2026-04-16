@@ -483,6 +483,11 @@ Contributions are welcome! Please:
 - New board definitions
 - Documentation improvements
 
+> [!IMPORTANT]
+> **Attention Forkers:** If you are using a fork of this repository, please **sync with the upstream `main` branch** before reporting bugs. This project is under active development, and many early-stage issues have already been patched.
+> 
+> **Note on Issues:** Please only raise issues or bug reports in the **[Main Upstream Repository](https://github.com/John-Varghese-EH/ESP32CAM-ONVIF/issues)**. I do not receive notifications for issues opened on forks, and they will likely go unnoticed.
+
 ---
 
 ## ⚠️ Disclaimer
