@@ -65,3 +65,5 @@ frame_*.jpg
 # Virtual ONVIF Server & GO2RTC
 onvif-server/
 go2rtc_win64/
+
+.agent/

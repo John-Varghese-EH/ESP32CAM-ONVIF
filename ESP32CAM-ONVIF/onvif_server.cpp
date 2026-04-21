@@ -18,8 +18,7 @@ WebServer onvifServer(ONVIF_PORT);
 WiFiUDP onvifUDP;
 static bool _onvifEnabled = DEFAULT_ONVIF_ENABLED;
 
-// Shared SOAP response buffer - single-threaded, saves 2KB vs separate static
-// buffers.
+// Shared SOAP response buffer - single-threaded, saves 2KB vs separate static buffers.
 static char s_soapBuf[2048];
 
 bool onvif_is_enabled() { return _onvifEnabled; }
@@ -117,10 +116,8 @@ const char PROGMEM TPL_TIME_FMT[] =
     "<tt:DaylightSavings>%s</tt:DaylightSavings>"
     "<tt:TimeZone><tt:TZ>%s</tt:TZ></tt:TimeZone>"
     "<tt:UTCDateTime>"
-    "<tt:Time><tt:Hour>%d</tt:Hour><tt:Minute>%d</tt:Minute><tt:Second>%d</"
-    "tt:Second></tt:Time>"
-    "<tt:Date><tt:Year>%d</tt:Year><tt:Month>%d</tt:Month><tt:Day>%d</tt:Day></"
-    "tt:Date>"
+    "<tt:Time><tt:Hour>%d</tt:Hour><tt:Minute>%d</tt:Minute><tt:Second>%d</tt:Second></tt:Time>"
+    "<tt:Date><tt:Year>%d</tt:Year><tt:Month>%d</tt:Month><tt:Day>%d</tt:Day></tt:Date>"
     "</tt:UTCDateTime>"
     "</tds:SystemDateAndTime>"
     "</tds:GetSystemDateAndTimeResponse>"
@@ -239,7 +236,8 @@ int findXmlElementStart(const String &xml, const char *elementName,
       // (not a letter), to avoid matching e.g. <UsernameToken when seeking
       // <Username
       int afterElem = idx + 1 + (int)prefixLen + (int)elemLen;
-      char nextChar = (afterElem < (int)xml.length()) ? xml[afterElem] : '\0';
+      char nextChar =
+          (afterElem < (int)xml.length()) ? xml[afterElem] : '\0';
       if (nextChar == '>' || nextChar == ' ' || nextChar == '/' ||
           nextChar == '\t' || nextChar == '\r' || nextChar == '\n') {
         // Valid element found; find the closing > of the opening tag
@@ -903,24 +901,24 @@ void handle_GetSystemDateAndTime() {
   int offset_sec = GMT_OFFSET_SEC;
   int offset_hours = offset_sec / 3600;
   int offset_minutes = abs((offset_sec % 3600) / 60);
-
+  
   char tz_str[32];
   if (offset_minutes > 0) {
     // e.g. IST-5:30 for UTC+5:30, CET-1 for UTC+1
-    snprintf(tz_str, sizeof(tz_str), "UTC%+d:%02d", -offset_hours,
-             offset_minutes);
+    snprintf(tz_str, sizeof(tz_str), "UTC%+d:%02d", -offset_hours, offset_minutes);
   } else {
     snprintf(tz_str, sizeof(tz_str), "UTC%+d", -offset_hours);
   }
 
-  const char *dst_str = (DAYLIGHT_OFFSET > 0) ? "true" : "false";
+  const char* dst_str = (DAYLIGHT_OFFSET > 0) ? "true" : "false";
 
   char *buffer = new char[1024];
   if (buffer) {
     snprintf_P(buffer, 1024, PART_HEADER);
     size_t len = strlen(buffer);
     // Note: tm_year is years since 1900, tm_mon is 0-11
-    snprintf_P(buffer + len, 1024 - len, TPL_TIME_FMT, dst_str, tz_str,
+    snprintf_P(buffer + len, 1024 - len, TPL_TIME_FMT, 
+               dst_str, tz_str,
                timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
                timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday);
 
@@ -981,8 +979,7 @@ void handle_ptz(String &req) {
       y = val.toFloat();
     }
 
-    // Pass ONVIF-native -1..1 values directly; ptz_set_absolute() performs the
-    // mapping.
+    // Pass ONVIF-native -1..1 values directly; ptz_set_absolute() performs the mapping.
     ptz_set_absolute(x, y);
     Serial.printf("[INFO] PTZ AbsoluteMove: x=%.2f y=%.2f\n", x, y);
   }
