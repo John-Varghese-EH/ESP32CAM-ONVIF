@@ -15,7 +15,7 @@ enum RTSP_CMD_TYPES
     RTSP_UNKNOWN
 };
 
-#define RTSP_BUFFER_SIZE       10000    // for incoming requests, and outgoing responses
+#define RTSP_BUFFER_SIZE       2048    // for incoming requests, and outgoing responses (reduced from 10000 to save SRAM)
 #define RTSP_PARAM_STRING_MAX  200
 #define MAX_HOSTNAME_LEN       256
 
@@ -64,8 +64,6 @@ private:
     bool m_TcpTransport;                                      // if Tcp based streaming was activated
     CStreamer    * m_Streamer;                                // the UDP or TCP streamer of that session
 
-public:
-    void* m_ClientPtr;                                        // Pointer to WiFiClient for memory management
 
     // parameters of the last received RTSP request
 

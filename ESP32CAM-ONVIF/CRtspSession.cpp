@@ -22,17 +22,15 @@ CRtspSession::CRtspSession(SOCKET aRtspClient, CStreamer * aStreamer) : m_RtspCl
     m_TcpTransport   =  false;
     m_streaming = false;
     m_stopped = false;
-    m_ClientPtr = nullptr;  // Will be set externally if needed
 };
 
 CRtspSession::~CRtspSession()
 {
+    // closesocket() handles both stop() and delete of the WiFiClient.
+    // SOCKET is typedef'd to WiFiClient* (see platglue-esp32.h).
+    // m_RtspClient IS the heap-allocated WiFiClient — no separate cleanup needed.
     closesocket(m_RtspClient);
-    // Memory leak fix: Delete the WiFiClient if we own it
-    if (m_ClientPtr) {
-        delete m_ClientPtr;
-        m_ClientPtr = nullptr;
-    }
+    m_RtspClient = nullptr;
 };
 
 void CRtspSession::Init()
@@ -58,7 +56,7 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
     // check whether the request contains information about the RTP/RTCP UDP client ports (SETUP command)
     char * ClientPortPtr;
     char * TmpPtr;
-    static char CP[1024];
+    static char CP[256];
     char * pCP;
 
     ClientPortPtr = strstr(CurRequest,"client_port");
