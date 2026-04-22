@@ -33,11 +33,27 @@ const api = async (ep, opts = {}, timeoutMs = 10000) => {
     }
 };
 
-function showToast(msg) {
-    const t = el('rec-toast');
-    t.innerText = msg;
-    t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 3000);
+// Enhanced toast system with types and stacking
+function showToast(msg, type = 'info') {
+    const container = el('toast-container');
+    if (!container) {
+        // Fallback to old toast if container doesn't exist
+        const t = el('rec-toast');
+        if (t) { t.innerText = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+        return;
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast-item toast-${type}`;
+    const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+    toast.innerHTML = `<span style="font-size:1.1rem;min-width:16px;text-align:center">${icons[type] || icons.info}</span><span style="flex:1">${msg}</span><div class="toast-progress"></div>`;
+    container.appendChild(toast);
+    // Auto-remove after 3.2s
+    setTimeout(() => {
+        toast.classList.add('removing');
+        setTimeout(() => toast.remove(), 250);
+    }, 3200);
+    // Max 4 toasts
+    while (container.children.length > 4) container.firstChild.remove();
 }
 
 // ==================== TABS ====================
@@ -49,7 +65,7 @@ function setTab(id, event) {
         event.target.classList.add('active');
     }
     if (id === 'net') { updateWifi(); updateBt(); }
-    if (id === 'sys') { updateSystemInfo(); updateSDInfo(); }
+    if (id === 'sys') { updateSystemInfo(); updateSDInfo(); checkForUpdates(); }
     if (id === 'events') updateEventLog();
     if (id === 'recordings') loadRecordings();
 }
@@ -136,26 +152,32 @@ async function toggleRecord() {
         // Start
         if (mode === 'device') {
             startClientRecord();
-            showToast("Video saving to Device ⬇️");
+            showToast("Recording to device", 'success');
         } else {
             // SD Card
             await api('/api/record', { method: 'POST', body: JSON.stringify({ action: 'start' }) });
-            showToast("Recording to SD Card 💾");
+            showToast("Recording to SD Card", 'success');
         }
         isRecording = true;
         btn.innerHTML = '⬛'; // Stop icon
         btn.classList.add('pulse');
+        // Add recording visual state to video container
+        const vcont = el('vcont');
+        if (vcont) vcont.classList.add('recording');
     } else {
         // Stop
         if (mode === 'device') {
             stopClientRecord();
         } else {
             await api('/api/record', { method: 'POST', body: JSON.stringify({ action: 'stop' }) });
-            showToast("Recording Stopped");
+            showToast("Recording stopped", 'info');
         }
         isRecording = false;
         btn.innerHTML = '🔴';
         btn.classList.remove('pulse');
+        // Remove recording visual state
+        const vcont = el('vcont');
+        if (vcont) vcont.classList.remove('recording');
     }
 }
 
@@ -378,7 +400,7 @@ async function updateEventLog() {
                             e.type === 'auth' ? '🔐' : '⚠️';
 
             const item = document.createElement('div');
-            item.className = 'event-item';
+            item.className = `event-item ${e.type}`;
             item.innerHTML = `
                 <span class="event-time">${timeStr}</span>
                 <span class="event-icon">${icon}</span>
@@ -499,6 +521,7 @@ function quickToggleONVIF() {
 
 // ==================== System Information ====================
 async function updateSystemInfo() {
+    loadIntegrations();
     const d = await api('/api/system/info');
     if (d) {
         if (el('info-resolution')) el('info-resolution').innerText = d.resolution;
@@ -825,13 +848,98 @@ function startOTA() {
 }
 
 // ==================== STATUS LOOP ====================
+let resGraph = { ts: [], heap: [], psram: [] };
 async function updateStatus() {
     const d = await api('/api/status');
     if (d) {
         el('status-pill').classList.remove('offline');
         el('status-text').innerText = "Online";
-        el('val-uptime').innerText = Math.floor(d.uptime / 60) + "m";
-        el('val-heap').innerText = Math.round(d.heap / 1024) + "KB";
+        if (el('val-uptime')) el('val-uptime').innerText = Math.floor(d.uptime / 60) + "m";
+        if (el('val-heap')) el('val-heap').innerText = Math.round(d.heap / 1024) + "KB";
+
+        // System monitor (Live Resource Monitor)
+        const pad0 = n => n < 10 ? '0'+n : n;
+        const hh = Math.floor(d.uptime / 3600);
+        const mm = Math.floor((d.uptime % 3600) / 60);
+        const ss = d.uptime % 60;
+        if (el('sys-uptime')) el('sys-uptime').innerText = `${pad0(hh)}:${pad0(mm)}:${pad0(ss)}`;
+        if (el('sys-heap')) el('sys-heap').innerText = (d.heap / 1024).toFixed(1) + " KB";
+        if (el('sys-min-heap')) el('sys-min-heap').innerText = (d.min_heap / 1024).toFixed(1) + " KB";
+        if (el('sys-psram')) el('sys-psram').innerText = (d.psram_free / 1024 / 1024).toFixed(2) + " MB";
+
+        // Graphing
+        const cvs = el('resource-graph');
+        if (cvs) {
+            if (resGraph.ts.length > 50) { resGraph.ts.shift(); resGraph.heap.shift(); resGraph.psram.shift(); }
+            resGraph.ts.push(new Date());
+            resGraph.heap.push(d.heap / 1024);
+            resGraph.psram.push(d.psram_free / 1024 / 1024);
+
+            const ctx = cvs.getContext('2d');
+            cvs.width = cvs.clientWidth * window.devicePixelRatio;
+            cvs.height = cvs.clientHeight * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            const w = cvs.clientWidth, h = cvs.clientHeight;
+
+            ctx.clearRect(0, 0, w, h);
+
+            if (resGraph.heap.length > 1) {
+                const maxHeap = Math.max(...resGraph.heap) * 1.2 || 1;
+                const maxPsram = Math.max(...resGraph.psram) * 1.2 || 1;
+                const minHeap = 0;
+                
+                // Draw grid lines
+                ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                for (let i = 1; i < 4; i++) {
+                    const y = h - (h / 4) * i;
+                    ctx.moveTo(0, y); ctx.lineTo(w, y);
+                }
+                ctx.stroke();
+
+                // Draw Heap Line
+                ctx.beginPath();
+                ctx.strokeStyle = '#3b82f6';
+                ctx.lineWidth = 2;
+                resGraph.heap.forEach((val, i) => {
+                    const x = (i / 50) * w;
+                    const y = h - ((val - minHeap) / (maxHeap - minHeap)) * h;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+                
+                // Fill under Heap
+                ctx.lineTo(w, h);
+                ctx.lineTo(0, h);
+                ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+                ctx.fill();
+
+                // Draw PSRAM Line
+                if (maxPsram > 0 && resGraph.psram.some(p => p > 0)) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#10b981'; // Emerald/Accent color
+                    ctx.lineWidth = 2;
+                    resGraph.psram.forEach((val, i) => {
+                        const x = (i / 50) * w;
+                        const y = h - (val / maxPsram) * h;
+                        if (i === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    });
+                    ctx.stroke();
+                }
+
+                // Draw Legend
+                ctx.font = '10px sans-serif';
+                ctx.fillStyle = '#3b82f6';
+                ctx.fillText('Heap', 10, 20);
+                if (maxPsram > 0 && resGraph.psram.some(p => p > 0)) {
+                    ctx.fillStyle = '#10b981';
+                    ctx.fillText('PSRAM', 40, 20);
+                }
+            }
+        }
 
         // WiFi Signal Strength
         if (el('val-rssi') && d.rssi !== undefined) {
@@ -896,11 +1004,17 @@ streamImg.onerror = () => {
             streamImg.src = '/stream?t=' + Date.now();
         }
     }, 2000);
+    // Show offline overlay
+    const overlay = el('stream-offline-overlay');
+    if (overlay) overlay.classList.add('visible');
 };
 
 streamImg.onload = () => {
     el('status-pill').classList.remove('offline');
     el('status-text').innerText = "Online";
+    // Hide offline overlay
+    const overlay = el('stream-offline-overlay');
+    if (overlay) overlay.classList.remove('visible');
 }
 
 // ==================== CLEANUP & OPTIMIZATION ====================
@@ -934,6 +1048,10 @@ window.addEventListener('beforeunload', cleanup);
 
 // ==================== INIT ====================
 window.onload = () => {
+    // Restore theme preference
+    const savedTheme = localStorage.getItem('esp32cam_theme');
+    if (savedTheme === 'light') document.body.classList.add('light-theme');
+
     el('stream').src = '/stream?t=' + Date.now();
     updateStatus();
     updateWifi();
@@ -1833,3 +1951,885 @@ const objectDetection = {
 function toggleDetection() {
     objectDetection.toggle();
 }
+
+// ==================== AI VISION - GEMINI BYOK ====================
+// All processing happens in-browser. Zero ESP32 overhead.
+
+function saveApiKey() {
+    const key = el('ai-api-key').value.trim();
+    if (!key) { showToast('Please enter an API key'); return; }
+    localStorage.setItem('gemini_api_key', key);
+    showToast('API key saved securely in browser');
+}
+
+// Restore saved key on load
+(function initAiVision() {
+    const savedKey = localStorage.getItem('gemini_api_key');
+    if (savedKey && el('ai-api-key')) {
+        el('ai-api-key').value = savedKey;
+    }
+    renderAiHistory();
+})();
+
+let _aiAbort = null; // AbortController for cancelling requests
+
+async function aiAnalyze(prompt) {
+    if (!prompt || !prompt.trim()) {
+        showToast('Please enter a prompt');
+        return;
+    }
+
+    const apiKey = localStorage.getItem('gemini_api_key');
+    if (!apiKey) {
+        showToast('Please save your Gemini API key first');
+        return;
+    }
+
+    const output = el('ai-output');
+    const statusEl = el('ai-status');
+    const tokensEl = el('ai-tokens');
+    const btn = el('btn-ai-analyze');
+
+    // Cancel any in-flight request
+    if (_aiAbort) _aiAbort.abort();
+    _aiAbort = new AbortController();
+
+    // UI: loading state
+    output.innerHTML = '<span class="ai-loading"></span> Capturing snapshot and analyzing...';
+    statusEl.innerText = 'Analyzing...';
+    tokensEl.innerText = '';
+    btn.disabled = true;
+    btn.innerText = 'Analyzing...';
+
+    try {
+        // 1. Capture current frame from stream
+        const img = el('stream');
+        let base64Data;
+
+        if (img && img.src && img.src.includes('/stream') && img.naturalWidth > 0) {
+            // Capture from live stream via canvas
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            canvas.getContext('2d').drawImage(img, 0, 0);
+            base64Data = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+        } else {
+            // Fallback: fetch snapshot directly
+            output.innerHTML = '<span class="ai-loading"></span> Fetching snapshot...';
+            const snapResp = await fetch('/snapshot');
+            if (!snapResp.ok) throw new Error('Failed to capture snapshot');
+            const blob = await snapResp.blob();
+            base64Data = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        // Show the captured image in the UI
+        if (el('ai-img-preview-container') && el('ai-img-preview')) {
+            el('ai-img-preview-container').style.display = 'flex';
+            el('ai-img-preview').src = 'data:image/jpeg;base64,' + base64Data;
+        }
+
+        output.innerHTML = '<span class="ai-loading"></span> Sending to Gemini...';
+
+        // 2. Call Gemini API with streaming (SSE)
+        const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=${apiKey}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                signal: _aiAbort.signal,
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [
+                            { text: prompt },
+                            { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
+                        ]
+                    }]
+                })
+            }
+        );
+
+        if (!response.ok) {
+            const errBody = await response.text();
+            let errMsg = `API Error ${response.status}`;
+            try {
+                const errJson = JSON.parse(errBody);
+                errMsg = errJson.error?.message || errMsg;
+            } catch (_) { }
+            throw new Error(errMsg);
+        }
+
+        // 3. Stream the response
+        output.innerHTML = '';
+        let fullText = '';
+        let totalTokens = 0;
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // Parse SSE lines
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const jsonStr = line.slice(6).trim();
+                if (!jsonStr || jsonStr === '[DONE]') continue;
+
+                try {
+                    const data = JSON.parse(jsonStr);
+
+                    // Extract text from candidates
+                    if (data.candidates && data.candidates[0]) {
+                        const parts = data.candidates[0].content?.parts;
+                        if (parts) {
+                            for (const part of parts) {
+                                if (part.text) {
+                                    fullText += part.text;
+                                }
+                            }
+                        }
+                    }
+
+                    // Extract token count
+                    if (data.usageMetadata) {
+                        totalTokens = data.usageMetadata.totalTokenCount || 0;
+                    }
+                } catch (parseErr) {
+                    // Skip malformed JSON chunks
+                }
+            }
+
+            // Render with basic markdown formatting
+            output.innerHTML = renderMarkdown(fullText) + '<span class="ai-cursor"></span>';
+            output.scrollTop = output.scrollHeight;
+            statusEl.innerText = 'Streaming...';
+        }
+
+        // Final render (remove cursor)
+        output.innerHTML = renderMarkdown(fullText);
+        statusEl.innerText = 'Complete';
+        if (totalTokens > 0) {
+            tokensEl.innerText = totalTokens + ' tokens';
+        }
+
+        // Save to history
+        saveAiHistory(prompt, fullText);
+
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            output.innerHTML = '<span style="color:var(--text-muted)">Analysis cancelled.</span>';
+            statusEl.innerText = 'Cancelled';
+        } else {
+            output.innerHTML = `<span style="color:var(--danger)">Error: ${escapeHtml(err.message)}</span>`;
+            statusEl.innerText = 'Error';
+            console.error('AI Vision error:', err);
+        }
+    } finally {
+        btn.disabled = false;
+        btn.innerText = 'Analyze';
+        _aiAbort = null;
+    }
+}
+
+// Simple markdown renderer for AI output
+function renderMarkdown(text) {
+    let html = escapeHtml(text);
+    // Bold: **text**
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // Italic: *text*
+    html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+    // Inline code: `code`
+    html = html.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.1);padding:1px 4px;border-radius:3px">$1</code>');
+    // Numbered lists
+    html = html.replace(/^(\d+)\.\s/gm, '<br>$1. ');
+    // Bullet lists
+    html = html.replace(/^[\-\*]\s/gm, '<br>• ');
+    // Headers
+    html = html.replace(/^### (.+)$/gm, '<br><strong style="font-size:1rem;color:var(--accent)">$1</strong>');
+    html = html.replace(/^## (.+)$/gm, '<br><strong style="font-size:1.1rem;color:var(--primary)">$1</strong>');
+    // Line breaks
+    html = html.replace(/\n/g, '<br>');
+    return html;
+}
+
+function escapeHtml(text) {
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+    return text.replace(/[&<>"']/g, c => map[c]);
+}
+
+// History management (localStorage, max 10)
+function saveAiHistory(prompt, response) {
+    let history = JSON.parse(localStorage.getItem('ai_history') || '[]');
+    history.unshift({
+        prompt: prompt,
+        response: response,
+        time: new Date().toISOString()
+    });
+    if (history.length > 10) history = history.slice(0, 10);
+    localStorage.setItem('ai_history', JSON.stringify(history));
+    renderAiHistory();
+}
+
+function renderAiHistory() {
+    const container = el('ai-history');
+    if (!container) return;
+
+    const history = JSON.parse(localStorage.getItem('ai_history') || '[]');
+
+    if (history.length === 0) {
+        container.innerHTML = '<span style="color:var(--text-muted)">No analyses yet</span>';
+        return;
+    }
+
+    container.innerHTML = history.map((item, i) => {
+        const time = new Date(item.time).toLocaleString();
+        const preview = item.response.substring(0, 120) + (item.response.length > 120 ? '...' : '');
+        return `
+            <div class="ai-history-item" onclick="loadAiHistory(${i})">
+                <div class="ai-h-prompt">${escapeHtml(item.prompt.substring(0, 60))}</div>
+                <div class="ai-h-time">${time}</div>
+                <div class="ai-h-preview">${escapeHtml(preview)}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function loadAiHistory(index) {
+    const history = JSON.parse(localStorage.getItem('ai_history') || '[]');
+    if (history[index]) {
+        el('ai-output').innerHTML = renderMarkdown(history[index].response);
+        el('ai-status').innerText = 'Loaded from history';
+        el('ai-custom-prompt').value = history[index].prompt;
+    }
+}
+
+function clearAiHistory() {
+    if (!confirm('Clear all AI analysis history?')) return;
+    localStorage.removeItem('ai_history');
+    renderAiHistory();
+    showToast('AI history cleared');
+}
+
+// Auto-start stream on page load
+window.addEventListener('DOMContentLoaded', () => {
+    const img = el('stream');
+    if (!img.src || img.src === window.location.href || img.getAttribute('src') === '') {
+        toggleStream();
+    }
+
+    // Load custom theme
+    const savedTheme = localStorage.getItem('ui-accent');
+    if (savedTheme) {
+        updateThemeColor(savedTheme);
+    }
+});
+
+// ==================== IMPRESSIVE FEATURES ====================
+
+// Custom Theme Handler
+function updateThemeColor(color) {
+    document.documentElement.style.setProperty('--primary', color);
+    localStorage.setItem('ui-accent', color);
+    const picker = el('theme-color-picker');
+    if (picker && picker.value !== color) {
+        picker.value = color; // sync picker UI reset
+    }
+}
+
+// Double-click to fullscreen
+window.addEventListener('DOMContentLoaded', () => {
+    const wrapper = el('video-wrapper');
+    if (wrapper) {
+        wrapper.addEventListener('dblclick', toggleFS);
+    }
+});
+
+// Quick Control APIs
+async function toggleOption(opt) {
+    // Determine the current checkbox state if available in the UI
+    const checkbox = el(`camera-${opt}`);
+    let newVal;
+    if (checkbox) {
+        checkbox.checked = !checkbox.checked;
+        newVal = checkbox.checked ? 1 : 0;
+    } else {
+        // Blind toggle fallback
+        newVal = 1;
+    }
+
+    const payload = {};
+    payload[opt] = newVal;
+
+    await api('/api/config', { method: 'POST', body: JSON.stringify(payload) });
+    showToast(`${opt} toggled`);
+}
+
+async function applyFrameSize(val) {
+    const resString = val === 10 ? 'HD' : 'QVGA'; // 10 is FRAMESIZE_HD, 5 is FRAMESIZE_QVGA
+    await api('/api/config', { method: 'POST', body: JSON.stringify({ resolution: resString }) });
+    showToast(`Resolution Set to ${resString}`);
+}
+
+// 2. Picture-in-Picture logic
+let pipVideo = null;
+let pipCanvas = null;
+let pipCtx = null;
+let pipInterval = null;
+
+async function togglePiP() {
+    if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        return;
+    }
+
+    if (!('pictureInPictureEnabled' in document)) {
+        showToast("PiP not supported in this browser 😢");
+        return;
+    }
+
+    const img = el('stream');
+    if (!img || img.naturalWidth === 0) {
+        showToast("Stream must be playing first!");
+        return;
+    }
+
+    if (!pipVideo) {
+        pipCanvas = document.createElement('canvas');
+        pipCtx = pipCanvas.getContext('2d');
+        pipVideo = document.createElement('video');
+        pipVideo.muted = true;
+        pipVideo.autoplay = true;
+        pipVideo.playsInline = true;
+
+        // Listeners to clean up loop
+        pipVideo.addEventListener('leavepictureinpicture', () => {
+            clearInterval(pipInterval);
+            pipVideo.pause();
+        });
+    }
+
+    pipCanvas.width = img.naturalWidth || 640;
+    pipCanvas.height = img.naturalHeight || 480;
+
+    if ("captureStream" in pipCanvas) {
+        pipVideo.srcObject = pipCanvas.captureStream(15);
+    } else if ("mozCaptureStream" in pipCanvas) {
+        pipVideo.srcObject = pipCanvas.mozCaptureStream(15);
+    }
+
+    // CRITICAL FIX: Start drawing loop for PiP before awaiting play()
+    if (pipInterval) clearInterval(pipInterval);
+    pipCtx.drawImage(img, 0, 0, pipCanvas.width, pipCanvas.height);
+
+    pipInterval = setInterval(() => {
+        if (img.complete && img.naturalWidth > 0) {
+            pipCtx.drawImage(img, 0, 0, pipCanvas.width, pipCanvas.height);
+        }
+    }, 1000 / 15);
+
+    try {
+        await pipVideo.play();
+        await pipVideo.requestPictureInPicture();
+        showToast("Picture in Picture Started 🔲");
+    } catch (e) {
+        console.error("PiP Error:", e);
+        showToast("Error starting PiP!");
+        clearInterval(pipInterval);
+    }
+}
+
+// 3. Digital PTZ (Pan/Tilt/Zoom)
+let ptzZoom = 1;
+let ptzPanX = 0;
+let ptzPanY = 0;
+let isDraggingPTZ = false;
+let startX, startY;
+
+window.addEventListener('DOMContentLoaded', () => {
+    const wrapper = el('video-wrapper');
+    const feed = el('stream');
+    if (!wrapper || !feed) return;
+
+    // Mouse wheel zoom
+    wrapper.addEventListener('wheel', e => {
+        e.preventDefault();
+        ptzZoom += e.deltaY * -0.002;
+        ptzZoom = Math.min(Math.max(1, ptzZoom), 6); // Clamp 1x to 6x
+        applyPTZ();
+    });
+
+    // Panning logic
+    wrapper.addEventListener('mousedown', e => {
+        if (ptzZoom <= 1) return;
+        isDraggingPTZ = true;
+        startX = e.clientX - ptzPanX;
+        startY = e.clientY - ptzPanY;
+        feed.style.cursor = 'grabbing';
+    });
+
+    // Touch support (mobile pinch/pan)
+    let initialPinchDistance = null;
+    let initialZoom = 1;
+    wrapper.addEventListener('touchstart', e => {
+        if (e.touches.length === 2) {
+            initialPinchDistance = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            initialZoom = ptzZoom;
+        } else if (e.touches.length === 1 && ptzZoom > 1) {
+            isDraggingPTZ = true;
+            startX = e.touches[0].clientX - ptzPanX;
+            startY = e.touches[0].clientY - ptzPanY;
+        }
+    });
+
+    wrapper.addEventListener('touchmove', e => {
+        if (e.touches.length === 2 && initialPinchDistance) {
+            e.preventDefault(); // Stop page scaling
+            const dist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            const scale = dist / initialPinchDistance;
+            ptzZoom = Math.min(Math.max(1, initialZoom * scale), 6);
+            applyPTZ();
+        } else if (e.touches.length === 1 && isDraggingPTZ) {
+            e.preventDefault(); // Stop scroll
+            ptzPanX = e.touches[0].clientX - startX;
+            ptzPanY = e.touches[0].clientY - startY;
+            applyPTZ();
+        }
+    }, { passive: false });
+
+    window.addEventListener('touchend', () => {
+        isDraggingPTZ = false;
+        initialPinchDistance = null;
+    });
+
+    window.addEventListener('mouseup', () => {
+        isDraggingPTZ = false;
+        feed.style.cursor = 'grab';
+    });
+
+    window.addEventListener('mousemove', e => {
+        if (!isDraggingPTZ || ptzZoom === 1) return;
+        ptzPanX = e.clientX - startX;
+        ptzPanY = e.clientY - startY;
+        applyPTZ();
+    });
+
+    function applyPTZ() {
+        if (ptzZoom === 1) {
+            ptzPanX = 0; ptzPanY = 0;
+            feed.style.transform = `scale(1) translate(0px, 0px)`;
+            return;
+        }
+
+        // Calculate boundaries so we don't pan out of the image completely
+        const rect = wrapper.getBoundingClientRect();
+        const maxPanX = (rect.width * ptzZoom - rect.width) / 2 / ptzZoom;
+        const maxPanY = (rect.height * ptzZoom - rect.height) / 2 / ptzZoom;
+
+        ptzPanX = Math.min(Math.max(-maxPanX * 2, ptzPanX), maxPanX * 2);
+        ptzPanY = Math.min(Math.max(-maxPanY * 2, ptzPanY), maxPanY * 2);
+
+        // Uses transform-origin 0 0 from CSS, but visual center bounds might differ slightly based on object-fit
+        // The most robust way visually is simply translating the center point.
+        feed.style.transform = `scale(${ptzZoom}) translate(${ptzPanX / ptzZoom}px, ${ptzPanY / ptzZoom}px)`;
+    }
+});
+
+// ==================== OTA FIRMWARE UPDATE ====================
+function startOTA() {
+    const fileInput = el('ota-file');
+    if (!fileInput.files.length) {
+        showToast("Please select a .bin file first");
+        return;
+    }
+
+    const file = fileInput.files[0];
+    if (!file.name.endsWith('.bin')) {
+        showToast("Invalid file format. Must be .bin");
+        return;
+    }
+
+    if (!confirm("Are you sure you want to update firmware? Do not power off the device!")) return;
+
+    const fd = new FormData();
+    fd.append("update", file, file.name);
+
+    el('ota-progress-container').style.display = 'block';
+    el('ota-status-text').style.display = 'block';
+    el('ota-progress-bar').style.width = '0%';
+    el('ota-progress-bar').innerText = '0%';
+    el('ota-status-text').innerText = 'Uploading... Please do not power off.';
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/update", true);
+
+    // The request needs authentication if we use authenticate() in backend,
+    // but the backend uses basic auth. The browser will handle it or we need to pass it.
+    // If user is already logged in, the browser sends the session cookies / auth header automatically.
+
+    xhr.upload.addEventListener("progress", function (evt) {
+        if (evt.lengthComputable) {
+            const pct = Math.round((evt.loaded / evt.total) * 100);
+            el('ota-progress-bar').style.width = pct + "%";
+            el('ota-progress-bar').innerText = pct + "%";
+        }
+    });
+
+    xhr.onload = function () {
+        if (xhr.status === 200) {
+            el('ota-progress-bar').style.backgroundColor = 'var(--success)';
+            el('ota-status-text').innerText = 'Update Successful! Rebooting device...';
+            showToast("Update Successful! Rebooting...");
+            setTimeout(() => { location.reload(); }, 15000); // wait 15 seconds to reload
+        } else {
+            el('ota-progress-bar').style.backgroundColor = 'var(--danger)';
+            el('ota-status-text').innerText = 'Update Failed!';
+            showToast("Update Failed: " + xhr.responseText);
+        }
+    };
+
+    xhr.onerror = function () {
+        el('ota-progress-bar').style.backgroundColor = 'var(--danger)';
+        el('ota-status-text').innerText = 'Network error during upload.';
+        showToast("Network Error during update");
+    };
+
+    xhr.send(fd);
+}
+
+let githubDownloadUrl = "";
+
+async function checkForUpdates() {
+    const btn = el('btn-check-update');
+    const info = el('github-update-info');
+    const curVer = el('current-version');
+    const latestVer = el('latest-version');
+
+    btn.innerText = "Checking...";
+    btn.disabled = true;
+
+    const d = await api('/api/update/check');
+    btn.disabled = false;
+    btn.innerText = "Check for GitHub Updates";
+
+    if (d && !d.error) {
+        curVer.innerText = d.current_version;
+        latestVer.innerText = d.latest_version;
+
+        if (d.latest_version !== "" && d.latest_version !== d.current_version) {
+            info.style.display = 'block';
+            githubDownloadUrl = d.download_url;
+        } else {
+            info.style.display = 'none';
+            showToast("You are already on the latest version.");
+        }
+    } else {
+        showToast(d.error || "Failed to check for updates");
+        curVer.innerText = "Error";
+    }
+}
+
+async function installGithubUpdate() {
+    if (!githubDownloadUrl) return;
+
+    if (!confirm("Are you sure you want to install the latest firmware from GitHub? The device will reboot automatically.")) return;
+
+    el('btn-install-update').disabled = true;
+    el('btn-install-update').innerText = "Initiating Download...";
+
+    el('ota-progress-container').style.display = 'block';
+    el('ota-status-text').style.display = 'block';
+    el('ota-progress-bar').style.width = '0%';
+    el('ota-progress-bar').innerText = '0%';
+    el('ota-status-text').innerText = "Starting background download...";
+
+    // Initiate background task
+    const d = await api('/api/update/github', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: githubDownloadUrl })
+    });
+
+    if (d && d.success) {
+        // Start polling for status
+        let pollInterval = setInterval(async () => {
+            const status = await api('/api/update/status');
+            if (status && status.progress !== undefined) {
+                if (status.progress >= 0 && status.progress <= 100) {
+                    el('ota-progress-bar').style.width = status.progress + '%';
+                    el('ota-progress-bar').innerText = status.progress + '%';
+                    el('ota-status-text').innerText = status.message || "Downloading...";
+
+                    if (status.progress === 100) {
+                        clearInterval(pollInterval);
+                        el('ota-progress-bar').style.backgroundColor = 'var(--success)';
+                        showToast("Update Successful! Rebooting...");
+                        setTimeout(() => { location.reload(); }, 15000);
+                    }
+                } else if (status.progress < 0) { // Error
+                    clearInterval(pollInterval);
+                    el('btn-install-update').disabled = false;
+                    el('btn-install-update').innerText = "Install OTA Update";
+                    el('ota-progress-bar').style.backgroundColor = 'var(--danger)';
+                    el('ota-status-text').innerText = "Update Error: " + (status.message || "Failed");
+                    showToast("Update Error: " + (status.message || "Failed"));
+                }
+            } else {
+                // If API fails to respond during reboot or heavy load, ignore temporarily
+                console.warn("Status poll failed or delayed...");
+            }
+        }, 1000); // poll every 1 second
+    } else {
+        el('btn-install-update').disabled = false;
+        el('btn-install-update').innerText = "Install OTA Update";
+        el('ota-status-text').innerText = "Failed to start update: " + (d.error || "Unknown error");
+        showToast(d.error || "Failed to start update");
+    }
+}
+
+// ==================== INTEGRATIONS (MQTT & TELEGRAM) ====================
+async function loadIntegrations() {
+    const d = await api('/api/settings');
+    if (d && !d.error) {
+        if (el('inp-mqtt-en')) el('inp-mqtt-en').checked = d.mqttEnabled;
+        if (el('inp-mqtt-broker')) el('inp-mqtt-broker').value = d.mqttBroker || '';
+        if (el('inp-mqtt-port')) el('inp-mqtt-port').value = d.mqttPort || 1883;
+        if (el('inp-mqtt-user')) el('inp-mqtt-user').value = d.mqttUser || '';
+        if (el('inp-mqtt-pass')) el('inp-mqtt-pass').value = d.mqttPass || '';
+
+        if (el('inp-tg-en')) el('inp-tg-en').checked = d.tgEnabled;
+        if (el('inp-tg-token')) el('inp-tg-token').value = d.tgToken || '';
+        if (el('inp-tg-chat')) el('inp-tg-chat').value = d.tgChatId || '';
+
+        if (el('inp-gd-en')) el('inp-gd-en').checked = !!d.gdEnabled;
+        if (el('inp-gd-motion')) el('inp-gd-motion').checked = d.gdMotion !== undefined ? !!d.gdMotion : true;
+        if (el('inp-gd-url')) el('inp-gd-url').value = d.gdUrl || '';
+        
+        // Load local preferences for GDrive
+        if (el('inp-gd-settings')) el('inp-gd-settings').checked = localStorage.getItem('esp32cam_gd_backup_settings') === '1';
+
+        if (el('inp-webdav-en')) el('inp-webdav-en').checked = !!d.webDav;
+        if (el('inp-cont-rec')) el('inp-cont-rec').checked = !!d.contRec;
+        if (el('inp-cont-chunk')) el('inp-cont-chunk').value = d.contRecChunk || 5;
+        if (el('inp-ntp-server')) el('inp-ntp-server').value = d.ntp || 'pool.ntp.org';
+        if (el('inp-tz')) el('inp-tz').value = d.tz || 'UTC0';
+    }
+}
+
+async function saveIntegrations() {
+    const payload = {
+        mqttEnabled: el('inp-mqtt-en') ? el('inp-mqtt-en').checked : false,
+        mqttBroker: el('inp-mqtt-broker') ? el('inp-mqtt-broker').value : '',
+        mqttPort: el('inp-mqtt-port') ? parseInt(el('inp-mqtt-port').value) : 1883,
+        mqttUser: el('inp-mqtt-user') ? el('inp-mqtt-user').value : '',
+        mqttPass: el('inp-mqtt-pass') ? el('inp-mqtt-pass').value : '',
+
+        tgEnabled: el('inp-tg-en') ? el('inp-tg-en').checked : false,
+        tgToken: el('inp-tg-token') ? el('inp-tg-token').value : '',
+        tgChatId: el('inp-tg-chat') ? el('inp-tg-chat').value : '',
+
+        gdEnabled: el('inp-gd-en') ? el('inp-gd-en').checked : false,
+        gdMotion: el('inp-gd-motion') ? el('inp-gd-motion').checked : true,
+        gdUrl: el('inp-gd-url') ? el('inp-gd-url').value : '',
+
+        webDav: el('inp-webdav-en') ? el('inp-webdav-en').checked : false,
+        contRec: el('inp-cont-rec') ? el('inp-cont-rec').checked : false,
+        contRecChunk: el('inp-cont-chunk') ? parseInt(el('inp-cont-chunk').value) : 5,
+        ntp: el('inp-ntp-server') ? el('inp-ntp-server').value : 'pool.ntp.org',
+        tz: el('inp-tz') ? el('inp-tz').value : 'UTC0'
+    };
+
+    const res = await api('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (res && res.success) {
+        showToast("Integrations Saved");
+    } else {
+        showToast("Error saving integrations");
+    }
+}
+
+// ==================== CCTV OVERLAY ====================
+setInterval(() => {
+    const overlay = el('cctv-overlay');
+    if (overlay) {
+        // Only show if video feed is actually playing
+        const streamImg = el('stream');
+        if (streamImg && streamImg.src && streamImg.src.includes('stream')) {
+            overlay.style.display = 'block';
+            const now = new Date();
+            const pad = n => n < 10 ? '0' + n : n;
+            const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+            const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+            overlay.innerText = `${dateStr}  ${timeStr}`;
+        } else {
+            overlay.style.display = 'none';
+        }
+    }
+}, 1000);
+
+// ==================== EVENT LOG & GDRIVE BACKUP ====================
+function addEvent(msg, type = 'system') {
+    const list = el('event-list');
+    const empty = el('event-empty');
+    if (!list) return;
+
+    if (empty) empty.style.display = 'none';
+
+    const item = document.createElement('div');
+    item.className = `event-item ${type}`;
+    item.dataset.type = type;
+
+    const now = new Date();
+    const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+
+    item.innerHTML = `
+        <span class="event-time">${time}</span>
+        <span class="event-msg">${msg}</span>
+    `;
+
+    list.insertBefore(item, list.firstChild);
+
+    // Keep max 100 events
+    while (list.children.length > 100) {
+        list.removeChild(list.lastChild);
+    }
+}
+
+function clearEventLog() {
+    const list = el('event-list');
+    const empty = el('event-empty');
+    if (list) list.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    showToast('Event log cleared');
+}
+
+function filterEvents(type, btn) {
+    // Update active button
+    document.querySelectorAll('.event-filter').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+
+    // Filter items
+    const items = document.querySelectorAll('.event-item');
+    let visibleCount = 0;
+    
+    items.forEach(item => {
+        if (type === 'all' || item.dataset.type === type) {
+            item.style.display = 'flex';
+            visibleCount++;
+        } else {
+            item.style.display = 'none';
+        }
+    });
+
+    const empty = el('event-empty');
+    if (empty) {
+        empty.style.display = visibleCount === 0 ? 'block' : 'none';
+        if (visibleCount === 0) {
+            empty.querySelector('p').innerText = type === 'all' ? 'No events recorded yet' : `No ${type} events found`;
+        }
+    }
+}
+
+// GDrive specific pref saving
+function saveGDrivePrefs() {
+    const backupSettings = el('inp-gd-settings')?.checked;
+    const backupLocal = el('inp-gd-localstorage')?.checked;
+    localStorage.setItem('esp32cam_gd_backup_settings', backupSettings ? '1' : '0');
+    localStorage.setItem('esp32cam_gd_backup_local', backupLocal ? '1' : '0');
+    showToast('GDrive preferences saved locally');
+}
+
+// Manual GDrive trigger
+async function manualGDriveBackup() {
+    const gdUrl = el('inp-gd-url')?.value;
+    if (!gdUrl) {
+        showToast('Please configure Apps Script URL first');
+        return;
+    }
+
+    showToast('Starting manual GDrive backup...');
+    addEvent('Manual Google Drive backup triggered', 'system');
+
+    try {
+        const backupSettings = el('inp-gd-settings')?.checked;
+        const backupLocal = el('inp-gd-localstorage')?.checked;
+        const backupMotion = el('inp-gd-motion')?.checked;
+        
+        const formData = new FormData();
+
+        // 1. Get snapshot if motion backup is checked, or if we just want a snapshot anyway
+        if (backupMotion) {
+            const res = await fetch('/capture');
+            const blob = await res.blob();
+            formData.append('image', blob, 'snapshot.jpg');
+        }
+        
+        // 2. Prepare payload
+        if (backupSettings) {
+            // Also append current settings
+            const d = await api('/api/settings');
+            const settingsBlob = new Blob([JSON.stringify(d, null, 2)], {type: 'application/json'});
+            formData.append('settings', settingsBlob, 'settings.json');
+        }
+
+        if (backupLocal) {
+            const localData = {};
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                localData[key] = localStorage.getItem(key);
+            }
+            const localBlob = new Blob([JSON.stringify(localData, null, 2)], {type: 'application/json'});
+            formData.append('localstorage', localBlob, 'localstorage.json');
+        }
+
+        if (!backupMotion && !backupSettings && !backupLocal) {
+            showToast('Please select at least one backup trigger');
+            return;
+        }
+
+        // 3. Send to Apps Script
+        const uploadRes = await fetch(gdUrl, {
+            method: 'POST',
+            body: formData,
+            mode: 'no-cors' // Often needed for Google Apps Script
+        });
+        
+        showToast('Backup request sent');
+        addEvent('Google Drive backup request sent successfully', 'wifi');
+    } catch(err) {
+        console.error(err);
+        showToast('Backup failed: ' + err.message);
+        addEvent('Google Drive backup failed: ' + err.message, 'system');
+    }
+}
+
+// Load local prefs on boot
+window.addEventListener('DOMContentLoaded', () => {
+    const doSettingsBackup = localStorage.getItem('esp32cam_gd_backup_settings') === '1';
+    const doLocalBackup = localStorage.getItem('esp32cam_gd_backup_local') === '1';
+    if (el('inp-gd-settings')) el('inp-gd-settings').checked = doSettingsBackup;
+    if (el('inp-gd-localstorage')) el('inp-gd-localstorage').checked = doLocalBackup;
+    
+    // Add boot event
+    addEvent('System booted and UI loaded', 'boot');
+});

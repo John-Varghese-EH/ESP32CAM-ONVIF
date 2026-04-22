@@ -6,15 +6,22 @@
   <title>ESP32-CAM ONVIF</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#000000">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Fonts: Using system font stack for offline reliability. Inter loaded async as enhancement -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"
+    media="print" onload="this.media='all'">
+  <noscript>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  </noscript>
   <link rel="icon" href="data:,">
-  <!-- TensorFlow.js for Object Detection -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
+  <!-- TensorFlow.js: Loaded on-demand when AI Detection is enabled (not blocking page load) -->
   <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container"></div>
 
   <header>
     <div class="brand">
@@ -31,34 +38,175 @@
   </header>
 
   <!-- Quick Actions FAB -->
-  <button class="fab" onclick="toggleQuickActions()" title="Quick Actions">⚡</button>
+  <button class="fab" onclick="toggleQuickActions()" title="Quick Actions"
+    style="display:flex; justify-content:center; align-items:center;">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">
+      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+    </svg>
+  </button>
 
+  <!-- Quick Actions Backdrop -->
+  <div id="qa-backdrop"
+    style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999; backdrop-filter:blur(2px)"
+    onclick="toggleQuickActions()"></div>
+
+  <!-- Quick Actions Overlay -->
   <div class="quick-actions-panel" id="quick-actions">
-    <h4>Quick Actions</h4>
-    <button class="btn" onclick="quickReboot()">🔄 Reboot</button>
-    <button class="btn" onclick="snap()">📸 Snapshot</button>
-    <button class="btn" onclick="toggleRecord()">🎥 Toggle Recording</button>
-    <button class="btn" onclick="toggleFlash()">💡 Toggle Flash</button>
-    <button class="btn" onclick="quickToggleONVIF()">📡 Toggle ONVIF</button>
-    <button class="btn" onclick="applyPreset('Night')">🌙 Night Mode</button>
-    <button class="btn" onclick="applyPreset('Daytime')">☀️ Day Mode</button>
-    <button class="btn" onclick="toggleQuickActions()">✖ Close</button>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+      <h4 style="margin:0;">Quick Actions</h4>
+      <button class="btn btn-icon"
+        style="width:32px; height:32px; padding:0; font-size:1.2rem; background:transparent; border:none; color:var(--text-muted);"
+        onclick="toggleQuickActions()">×</button>
+    </div>
+    <div class="quick-actions-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+      <button class="btn" onclick="quickReboot()"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-9.21l5.88-5.88" />
+        </svg> Reboot</button>
+      <button class="btn" onclick="snap()"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+          <circle cx="12" cy="13" r="4" />
+        </svg> Snapshot</button>
+      <button class="btn" id="qa-btn-record" onclick="toggleRecord()"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" id="qa-rec-icon" fill="currentColor">
+          <circle cx="12" cy="12" r="6" stroke="currentColor" stroke-width="2" />
+        </svg> Record</button>
+      <button class="btn" onclick="toggleFlash()"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+        </svg> Flash</button>
+      <button class="btn" onclick="quickToggleONVIF()"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L12 12M9 15A3 3 0 1 0 15 15A3 3 0 1 0 9 15M5 9A10 10 0 0 1 19 9" />
+        </svg> ONVIF</button>
+      <button class="btn" onclick="applyPreset('Night')"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg> Night Mode</button>
+      <button class="btn" onclick="applyPreset('Daytime')"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5" />
+          <path
+            d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+        </svg> Day Mode</button>
+      <button class="btn" onclick="toggleDetection()"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="10" rx="2" />
+          <circle cx="12" cy="5" r="2" />
+          <path d="M12 7v4M8 16h.01M16 16h.01" />
+        </svg> AI Detect</button>
+      <button class="btn" onclick="toggleOption('hmirror')"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+        </svg> H-Mirror</button>
+      <button class="btn" onclick="toggleOption('vflip')"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <path d="M12 3v18M12 3l-4 4M12 3l4 4M12 21l-4-4M12 21l4-4" />
+        </svg> V-Flip</button>
+      <button class="btn" onclick="applyFrameSize(10)"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="7" width="20" height="10" rx="2" ry="2" />
+          <path d="M6 10v4M6 12h4M10 10v4M14 10v4M18 10v4M14 10h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-2z" />
+        </svg> High Res</button>
+      <button class="btn" onclick="applyFrameSize(5)"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="7" width="20" height="10" rx="2" ry="2" />
+          <path
+            d="M9 10a2 2 0 0 0-2 2v0a2 2 0 0 0 2 2h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2H6M14 10v4h2a2 2 0 0 0 2-2v0a2 2 0 0 0-2-2h-2z" />
+        </svg> Low Res</button>
+      <button class="btn"
+        onclick="document.body.classList.toggle('light-theme');localStorage.setItem('esp32cam_theme',document.body.classList.contains('light-theme')?'light':'dark')"
+        style="display:flex; align-items:center; justify-content:flex-start; gap:8px;"><svg width="18" height="18"
+          viewBox="0 0 24 24" fill="none" class="qa-icon" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 2a10 10 0 0 0 0 20z" />
+        </svg> Theme</button>
+    </div>
   </div>
 
   <main>
-    <div class="tabs">
-      <button class="tab-btn active" onclick="setTab('dash', event)">Dashboard</button>
-      <button class="tab-btn" onclick="setTab('cam', event)">Camera</button>
-      <button class="tab-btn" onclick="setTab('net', event)">Network</button>
-      <button class="tab-btn" onclick="setTab('events', event)">Events</button>
-      <button class="tab-btn" onclick="setTab('recordings', event)">Recordings</button>
-      <button class="tab-btn" onclick="setTab('sys', event)">System</button>
+    <div class="tabs" role="tablist">
+      <button class="tab-btn active" onclick="setTab('dash', event)" role="tab" aria-selected="true"><svg width="16"
+          height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"></rect>
+          <rect x="14" y="3" width="7" height="7"></rect>
+          <rect x="14" y="14" width="7" height="7"></rect>
+          <rect x="3" y="14" width="7" height="7"></rect>
+        </svg><span class="tab-label">Dashboard</span></button>
+      <button class="tab-btn" onclick="setTab('ai', event)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="10" rx="2"></rect>
+          <circle cx="12" cy="5" r="2"></circle>
+          <path d="M12 7v4"></path>
+          <line x1="8" y1="16" x2="8.01" y2="16"></line>
+          <line x1="16" y1="16" x2="16.01" y2="16"></line>
+        </svg><span class="tab-label">AI</span></button>
+      <button class="tab-btn" onclick="setTab('cam', event)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg><span class="tab-label">Camera</span></button>
+      <button class="tab-btn" onclick="setTab('net', event)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2">
+          <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+          <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+          <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+          <line x1="12" y1="20" x2="12.01" y2="20"></line>
+        </svg><span class="tab-label">Network</span></button>
+      <button class="tab-btn" onclick="setTab('events', event)"><svg width="16" height="16" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg><span class="tab-label">Events</span></button>
+      <button class="tab-btn" onclick="setTab('recordings', event)"><svg width="16" height="16" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+          <line x1="7" y1="2" x2="7" y2="22"></line>
+          <line x1="17" y1="2" x2="17" y2="22"></line>
+          <line x1="2" y1="12" x2="22" y2="12"></line>
+        </svg><span class="tab-label">Clips</span></button>
+      <button class="tab-btn" onclick="setTab('sys', event)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path
+            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+          </path>
+        </svg><span class="tab-label">Settings</span></button>
     </div>
 
     <!-- PANEL: DASHBOARD -->
     <div id="tab-dash" class="panel active">
       <div class="video-container glass-panel" id="vcont">
-        <img id="stream" class="video-feed" src="" alt="Connecting..." crossorigin="anonymous">
+        <div
+          style="position: absolute; bottom: 5px; right: 8px; font-size: 0.45rem; opacity: 0.05; pointer-events: none; z-index: 9999; font-weight: bold;">
+          John Varghese (J0X) · Github: John-Varghese-EH</div>
+        <div class="video-feed-wrapper" id="video-wrapper">
+          <div id="cctv-overlay" class="cctv-overlay" style="display: none;"></div>
+          <img id="stream" class="video-feed" src="" alt="">
+          <div id="stream-offline-overlay" class="stream-offline-overlay">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+              style="opacity:0.6">
+              <path
+                d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01" />
+            </svg>
+            <span style="font-size:1.4rem;font-weight:700;letter-spacing:2px">OFFLINE</span>
+            <span style="font-size:0.8rem;color:var(--text-muted);font-weight:normal">Stream Disconnected</span>
+          </div>
+        </div>
         <div id="rec-toast" class="rec-toast">Recording Started</div>
 
         <!-- Stream Performance Overlay -->
@@ -68,18 +216,43 @@
         </div>
 
         <div class="video-controls">
-          <button class="btn btn-icon glass-panel" onclick="toggleStream()" title="Play/Pause">⏯</button>
+          <button class="btn btn-icon glass-panel" onclick="toggleStream()" title="Play/Pause"
+            aria-label="Play or Pause Stream"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg></button>
           <button class="btn btn-icon glass-panel" id="btn-record" onclick="toggleRecord()" title="Record"
-            style="color:var(--danger)">🔴</button>
-          <button class="btn btn-icon glass-panel" onclick="snap()" title="Snapshot">📸</button>
-          <button class="btn btn-icon glass-panel" id="btn-flash" onclick="toggleFlash()" title="Flash">⚡</button>
-          <button class="btn btn-icon glass-panel" onclick="toggleFS()" title="Fullscreen">⛶</button>
+            aria-label="Toggle Recording" style="color:var(--danger)"><svg width="18" height="18" viewBox="0 0 24 24"
+              fill="currentColor">
+              <circle cx="12" cy="12" r="6" stroke="currentColor" stroke-width="2" />
+            </svg></button>
+          <button class="btn btn-icon glass-panel" onclick="snap()" title="Snapshot" aria-label="Take Snapshot"><svg
+              width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg></button>
+          <button class="btn btn-icon glass-panel" id="btn-flash" onclick="toggleFlash()" title="Flash"
+            aria-label="Toggle Flash LED"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+            </svg></button>
+          <button class="btn btn-icon glass-panel" onclick="togglePiP()" title="Picture in Picture"
+            aria-label="Picture in Picture"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <rect x="12" y="12" width="7" height="7" rx="1" ry="1" />
+            </svg></button>
+          <button class="btn btn-icon glass-panel" onclick="toggleFS()" title="Fullscreen"
+            aria-label="Toggle Fullscreen"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" class="qa-icon"
+              stroke="currentColor" stroke-width="2">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+            </svg></button>
         </div>
       </div>
 
       <div class="grid">
         <div class="card glass-panel">
-          <h3>📊 System Status</h3>
+          <h3>System Status</h3>
           <div class="kv-group"><span class="label">Uptime</span> <span class="value" id="val-uptime">-</span></div>
           <div class="kv-group"><span class="label">Heap Free</span> <span class="value" id="val-heap">-</span></div>
           <div class="kv-group"><span class="label">WiFi Signal</span> <span class="value" id="val-rssi">-</span></div>
@@ -88,14 +261,42 @@
             <span class="label">AI Detection</span>
             <span class="value" id="detection-count" style="color:#6366f1">0 objects</span>
           </div>
+          <div id="detection-objects-list"
+            style="font-size:0.8rem; color:var(--text-muted); padding:4px 0; display:none;"></div>
           <button class="btn btn-primary" style="width:100%; margin-top:0.5rem" onclick="toggleDetection()"
             id="btn-detection">
-            🤖 Enable AI Detection
+            Enable AI Detection
           </button>
         </div>
 
+        <div class="card glass-panel" id="ptz-card">
+          <h3>Pan / Tilt Control</h3>
+          <div style="display:flex; justify-content:space-between; align-items:center; padding: 0 10px;">
+            <span class="label">Step Speed</span>
+            <input type="number" id="ptz-step-size" class="form-control"
+              style="width: 80px; text-align: center; padding: 6px;" min="1" max="45" value="5">
+          </div>
+          <div class="ptz-joystick">
+            <button class="ptz-joystick-btn pt-up" onclick="ptzStep('tilt', -1)">▲</button>
+            <button class="ptz-joystick-btn pt-left" onclick="ptzStep('pan', 1)">◀</button>
+            <button class="ptz-joystick-btn pt-home" onclick="ptzHome()">⌂</button>
+            <button class="ptz-joystick-btn pt-right" onclick="ptzStep('pan', -1)">▶</button>
+            <button class="ptz-joystick-btn pt-down" onclick="ptzStep('tilt', 1)">▼</button>
+          </div>
+          <button class="btn btn-primary" id="btn-ptz-patrol" style="width:100%; margin-top:0.5rem;"
+            onclick="togglePatrol()">Start Patrol Sweep</button>
+
+          <div style="display:flex; justify-content:center; align-items:center; margin-top:0.75rem; padding: 0 10px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"
+              title="Tracks humans on camera and smoothly follows them with PT servos">
+              <input type="checkbox" id="ai-ptz-tracking" onchange="togglePtzTracking(this.checked)">
+              <span style="font-size:0.85rem; color:var(--text-main);">Human Auto-Tracking</span>
+            </label>
+          </div>
+        </div>
+
         <div class="card glass-panel">
-          <h3>🎥 System Info</h3>
+          <h3>System Info</h3>
           <div class="kv-group"><span class="label">Resolution</span> <span class="value" id="info-resolution">-</span>
           </div>
           <div class="kv-group"><span class="label">Codec</span> <span class="value" id="info-codec">-</span></div>
@@ -105,7 +306,7 @@
         </div>
 
         <div class="card glass-panel">
-          <h3>💾 Recording</h3>
+          <h3>Recording</h3>
           <div class="kv-group">
             <span class="label">Location</span>
             <select class="form-control" style="width:auto" id="rec-mode" name="rec-mode">
@@ -125,7 +326,7 @@
     <div id="tab-cam" class="panel">
       <div class="grid">
         <div class="card glass-panel">
-          <h3>⚡ Quality Presets</h3>
+          <h3>Quality Presets</h3>
           <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem;">
             <button class="btn" onclick="applyPreset('Low')">Low (QVGA)</button>
             <button class="btn" onclick="applyPreset('Medium')">Medium (VGA)</button>
@@ -135,28 +336,28 @@
         </div>
 
         <div class="card glass-panel">
-          <h3>📁 Camera Profiles</h3>
+          <h3>Camera Profiles</h3>
           <select class="form-control" id="profile-list" onchange="loadProfile()" style="margin-bottom: 0.5rem">
             <option value="">Select Profile...</option>
           </select>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-            <button class="btn" onclick="saveProfile()">💾 Save</button>
-            <button class="btn" onclick="deleteProfile()">🗑 Delete</button>
+            <button class="btn" onclick="saveProfile()">Save</button>
+            <button class="btn" onclick="deleteProfile()">Delete</button>
           </div>
         </div>
 
         <div class="card glass-panel">
-          <h3>🔧 Image Settings</h3>
+          <h3>Image Settings</h3>
           <div class="input-group">
             <span class="input-label">Resolution</span>
             <select class="form-control" id="camera-resolution" name="camera-resolution"
               onchange="cfg('resolution', this.value)">
-              <option value="FRAMESIZE_UXGA">UXGA (1600x1200)</option>
-              <option value="FRAMESIZE_SXGA">SXGA (1280x1024)</option>
-              <option value="FRAMESIZE_HD">HD (1280x720)</option>
-              <option value="FRAMESIZE_VGA" selected>VGA (640x480)</option>
-              <option value="FRAMESIZE_QVGA">QVGA (320x240)</option>
-              <option value="FRAMESIZE_QQVGA">QQVGA (160x120)</option>
+              <option value="UXGA">UXGA (1600x1200)</option>
+              <option value="SXGA">SXGA (1280x1024)</option>
+              <option value="HD">HD (1280x720)</option>
+              <option value="VGA" selected>VGA (640x480)</option>
+              <option value="QVGA">QVGA (320x240)</option>
+              <option value="QQVGA">QQVGA (160x120)</option>
             </select>
           </div>
 
@@ -182,7 +383,7 @@
         </div>
 
         <div class="card glass-panel">
-          <h3>🎨 Advanced Controls</h3>
+          <h3>Advanced Controls</h3>
           <div class="input-group">
             <div class="flex-row" style="margin-bottom:4px;display:flex;justify-content:space-between">
               <span class="input-label">Saturation</span>
@@ -223,7 +424,7 @@
         </div>
 
         <div class="card glass-panel">
-          <h3>⚙️ Advanced</h3>
+          <h3>Advanced</h3>
           <div class="kv-group">
             <span>Auto Flash</span>
             <input type="checkbox" id="chk-autoflash" name="chk-autoflash"
@@ -246,7 +447,7 @@
         </div>
 
         <div class="card glass-panel" style="border-left: 4px solid var(--primary)">
-          <h3>📡 ONVIF</h3>
+          <h3>ONVIF</h3>
           <div class="kv-group">
             <span>Enable ONVIF</span>
             <input type="checkbox" id="chk-onvif" name="chk-onvif" checked
@@ -261,7 +462,7 @@
       <div class="grid">
         <!-- WiFi Section -->
         <div class="card glass-panel">
-          <h3>📡 WiFi Manager</h3>
+          <h3>WiFi Manager</h3>
           <div style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
             <div class="kv-group"><span class="label">SSID</span> <span class="value" id="wifi-ssid">...</span></div>
             <div class="kv-group"><span class="label">IP</span> <span class="value" id="wifi-ip">...</span></div>
@@ -273,7 +474,7 @@
 
         <!-- Network Diagnostics -->
         <div class="card glass-panel">
-          <h3>🔍 Diagnostics</h3>
+          <h3>Diagnostics</h3>
           <button class="btn" style="width:100%; margin-bottom: 0.5rem" id="btn-ping" onclick="runPingTest()">Run Ping
             Test</button>
           <div id="ping-result"
@@ -284,7 +485,7 @@
 
         <!-- Bluetooth & Audio Section -->
         <div class="card glass-panel">
-          <h3>🎤 Audio</h3>
+          <h3>Audio</h3>
           <div class="input-group">
             <span class="input-label">Source</span>
             <select class="form-control" id="audio-src" name="audio-src"
@@ -306,7 +507,7 @@
 
         <!-- Bluetooth Device Connection -->
         <div class="card glass-panel">
-          <h3>🎧 Bluetooth Devices</h3>
+          <h3>Bluetooth Devices</h3>
 
           <!-- Connection Status -->
           <div style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem;">
@@ -322,7 +523,7 @@
 
           <!-- Scan & Pair -->
           <button class="btn btn-primary" style="width:100%; margin-bottom: 0.5rem" onclick="scanBtDevices()">
-            🔍 Scan for Devices
+            Scan for Devices
           </button>
 
           <!-- Scanned Devices List -->
@@ -331,7 +532,7 @@
 
         <!-- Bluetooth Settings -->
         <div class="card glass-panel">
-          <h3>⚙️ Bluetooth Settings</h3>
+          <h3>Bluetooth Settings</h3>
           <div class="kv-group">
             <span>Enable BT</span>
             <input type="checkbox" id="bt-enable" name="bt-enable" onchange="cfgBt({enabled:this.checked})">
@@ -357,7 +558,7 @@
 
         <!-- Presence Detection (Optional) -->
         <div class="card glass-panel">
-          <h3>📍 Presence Detection</h3>
+          <h3>Presence Detection</h3>
           <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
             Monitor if a specific device is nearby (for automation)
           </p>
@@ -370,11 +571,127 @@
       </div>
     </div>
 
+    <!-- PANEL: AI -->
+    <div id="tab-ai" class="panel">
+      <div class="grid">
+        <!-- COCO-SSD Local Detection -->
+        <div class="card glass-panel" style="grid-column: 1 / -1;">
+          <h3>Local Object Detection (COCO-SSD)</h3>
+          <p style="font-size:0.8rem; color:var(--text-muted); margin:0;">Runs entirely in your browser using
+            TensorFlow.js — zero ESP32 load.</p>
+          <div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center;">
+            <button class="btn btn-primary" style="flex:1; min-width:200px;" onclick="toggleDetection()"
+              id="btn-detection-ai-tab">Enable AI Detection</button>
+            <div style="flex:1; min-width:200px; display:flex; align-items:center; gap:0.5rem;">
+              <span class="label">Detected:</span>
+              <span class="value" id="ai-tab-detection-count" style="color:#6366f1">0 objects</span>
+            </div>
+          </div>
+          <div id="ai-tab-detection-list"
+            style="font-size:0.8rem; color:var(--text-muted); padding:4px 0; display:none;"></div>
+          <div style="display:flex; align-items:center; gap:8px; margin-top:0.5rem;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"
+              title="Tracks humans and smoothly follows them with PT servos">
+              <input type="checkbox" id="ai-ptz-tracking-ai-tab"
+                onchange="togglePtzTracking(this.checked); if(el('ai-ptz-tracking')) el('ai-ptz-tracking').checked=this.checked;">
+              <span style="font-size:0.85rem; color:var(--text-main);">Human Auto-Tracking</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Gemini Cloud AI -->
+        <div class="card glass-panel" style="grid-column: 1 / -1;">
+          <h3>Cloud AI Analysis (Gemini)</h3>
+
+          <div style="display: flex; flex-wrap: wrap; gap: 1rem;">
+            <!-- Input side -->
+            <div style="flex: 1; min-width: 250px; display: flex; flex-direction: column;">
+              <input type="password" id="gemini-api-key" class="form-control" placeholder="Enter Gemini API Key"
+                style="margin-bottom: 0.5rem">
+
+              <select id="ai-preset" class="form-control" style="margin-bottom: 0.5rem">
+                <option value="Describe exactly what is happening in this image. List objects, people, and context.">
+                  Describe Scene</option>
+                <option value="Are there any humans in this image? Reply YES or NO, followed by brief details.">Human
+                  Detection</option>
+                <option value="Are there any packages or mail boxes clearly visible? Reply YES or NO.">Package Detection
+                </option>
+                <option value="Are there any vehicles in this image? Specify type if possible.">Vehicle Detection
+                </option>
+                <option value="Is there anything suspicious or unusual in this image? Identify any security threats.">
+                  Security Threat Mode</option>
+              </select>
+
+              <textarea id="ai-prompt" class="form-control" rows="2"
+                style="width: 100%; margin-bottom: 0.5rem; resize: vertical;" placeholder="Custom prompt..."></textarea>
+
+              <select id="ai-model" class="form-control" style="width: 100%; margin-bottom: 0.5rem">
+                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                <option value="gemini-2.0-flash-lite-preview-02-05">Gemini 2.0 Flash-Lite</option>
+                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+              </select>
+
+              <div
+                style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem; padding: 0.5rem; background: rgba(0,0,0,0.1); border-radius: 4px;">
+                <b>🔒 Privacy:</b> Snapshot is sent to Google servers only when you click Analyze.
+              </div>
+
+              <button class="btn btn-primary" style="width: 100%;" onclick="aiAnalyze()">
+                Analyze with Cloud API
+              </button>
+            </div>
+
+            <!-- Previews side -->
+            <div style="flex: 1; min-width: 250px; display: flex; flex-direction: column; gap: 0.5rem;">
+              <!-- Small Feed Preview -->
+              <div style="flex: 1; display: flex; flex-direction: column; gap: 0.5rem;">
+                <span class="label">Live Feed Preview</span>
+                <div
+                  style="position:relative; width: 100%; border-radius: 8px; border: 1px solid var(--glass-border); background: #000; overflow:hidden;">
+                  <img id="ai-live-preview" src=""
+                    style="width: 100%; display:block; object-fit: contain; min-height: 150px;">
+                  <canvas id="ai-live-detection-canvas"
+                    style="position:absolute; top:0; left:0; pointer-events:none;"></canvas>
+                </div>
+              </div>
+
+              <!-- Sent Snapshot Preview -->
+              <div id="ai-img-preview-container"
+                style="display: none; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
+                <span class="label">Sent Snapshot</span>
+                <img id="ai-img-preview" src=""
+                  style="width: 100%; border-radius: 8px; border: 1px solid var(--glass-border); object-fit: contain; background: #000;">
+              </div>
+            </div>
+
+            <!-- Output side -->
+            <div style="flex: 2; min-width: 300px; display: flex; flex-direction: column; gap: 0.5rem;">
+              <span class="label">Analysis Data</span>
+              <div id="ai-output" class="ai-output-area" style="height: 100%;">
+                <span style="color:var(--text-muted)">Results will appear here after analysis...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Analysis History -->
+        <div class="card glass-panel" style="grid-column: 1 / -1;">
+          <h3>Analysis History</h3>
+          <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem">
+            <button class="btn" onclick="clearAiHistory()" style="flex:1">Clear History</button>
+          </div>
+          <div id="ai-history" class="ai-history-area">
+            <span style="color:var(--text-muted)">No analyses yet</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- PANEL: EVENTS -->
     <div id="tab-events" class="panel">
       <div class="card glass-panel" style="max-width: 800px; margin: 0 auto;">
-        <h3>📝 Event Log</h3>
-        <button class="btn" style="margin-bottom: 1rem; width: 100%" onclick="clearEventLog()">🗑 Clear Events</button>
+        <h3>Event Log</h3>
+        <button class="btn" style="margin-bottom: 1rem; width: 100%" onclick="clearEventLog()">Clear Events</button>
         <div id="event-list" class="event-list"></div>
       </div>
     </div>
@@ -382,8 +699,8 @@
     <!-- PANEL: RECORDINGS -->
     <div id="tab-recordings" class="panel">
       <div class="card glass-panel" style="max-width: 900px; margin: 0 auto;">
-        <h3>🎬 Video Recordings</h3>
-        <button class="btn" style="margin-bottom: 1rem; width: 100%" onclick="loadRecordings()">🔄 Refresh List</button>
+        <h3>Video Recordings</h3>
+        <button class="btn" style="margin-bottom: 1rem; width: 100%" onclick="loadRecordings()">Refresh List</button>
         <div id="recordings-list"></div>
       </div>
     </div>
@@ -399,18 +716,67 @@
     <!-- PANEL: SYSTEM -->
     <div id="tab-sys" class="panel">
       <div class="grid">
-        <div class="card glass-panel">
-          <h3>📦 Firmware</h3>
-          <input type="file" id="ota-file" class="form-control" accept=".bin" style="margin-bottom: 1rem">
+        <!-- Resource Monitor -->
+        <div class="card glass-panel" style="grid-column: 1 / -1;">
+          <h3>Live Resource Monitor</h3>
           <div
-            style="height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow:hidden; margin-bottom: 1rem">
-            <div id="ota-bar" style="width:0%; height:100%; background: var(--primary); transition: width 0.2s"></div>
+            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem;">
+            <div style="background: rgba(0,0,0,0.1); padding: 1rem; border-radius: 8px;">
+              <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase;">System Uptime</div>
+              <div style="font-size: 1.5rem; font-weight: 600; color: var(--primary);" id="sys-uptime">-</div>
+            </div>
+            <div style="background: rgba(0,0,0,0.1); padding: 1rem; border-radius: 8px;">
+              <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase;">Heap Free</div>
+              <div style="font-size: 1.5rem; font-weight: 600;" id="sys-heap">-</div>
+            </div>
+            <div style="background: rgba(0,0,0,0.1); padding: 1rem; border-radius: 8px;">
+              <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase;">Minimum Heap Storage
+              </div>
+              <div style="font-size: 1.5rem; font-weight: 600; color: var(--accent);" id="sys-min-heap">-</div>
+            </div>
+            <div style="background: rgba(0,0,0,0.1); padding: 1rem; border-radius: 8px;">
+              <div style="color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase;">PSRAM Free</div>
+              <div style="font-size: 1.5rem; font-weight: 600;" id="sys-psram">-</div>
+            </div>
           </div>
-          <button class="btn btn-primary" onclick="startOTA()">Start Update</button>
+          <canvas id="resource-graph" style="width: 100%; height: 180px; margin-top: 1.5rem; border-radius: 8px; background: rgba(0,0,0,0.1);"></canvas>
         </div>
 
         <div class="card glass-panel">
-          <h3>💾 SD Card</h3>
+          <h3>Firmware OTA Update</h3>
+          <div class="kv-group" style="margin-bottom: 1rem;">
+            <span class="label">Current Version</span>
+            <span class="value" id="current-version" style="font-weight:bold; color:var(--primary);">Checking...</span>
+          </div>
+
+          <button class="btn" style="width: 100%; margin-bottom: 0.5rem;" onclick="checkForUpdates()"
+            id="btn-check-update">Check for GitHub Updates</button>
+
+          <div id="github-update-info"
+            style="display:none; background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <div class="kv-group"><span class="label">Latest Release</span> <span class="value"
+                id="latest-version">-</span></div>
+            <button class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;" onclick="installGithubUpdate()"
+              id="btn-install-update">Install OTA Update</button>
+          </div>
+
+          <hr style="border:0; height:1px; background:var(--glass-border); margin: 1rem 0;">
+
+          <div style="margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--text-muted);">Manual Update (.bin)</div>
+          <input type="file" id="ota-file" class="form-control" accept=".bin" style="margin-bottom: 1rem">
+          <button class="btn" style="width: 100%" onclick="startOTA()">Upload & Update</button>
+
+          <!-- Progress bar for OTA -->
+          <div class="progress" style="display:none; margin-top:1rem" id="ota-progress-container">
+            <div class="progress-bar" id="ota-progress-bar" style="width:0%">0%</div>
+          </div>
+          <div id="ota-status-text"
+            style="font-size: 0.8rem; color: var(--text-muted); text-align: center; margin-top: 0.5rem; display:none;">
+            Updating... Please do not power off.</div>
+        </div>
+
+        <div class="card glass-panel">
+          <h3>SD Card</h3>
           <div class="kv-group"><span class="label">Total</span> <span class="value" id="sd-total">-</span></div>
           <div class="kv-group"><span class="label">Used</span> <span class="value" id="sd-used">-</span></div>
           <div class="kv-group"><span class="label">Free</span> <span class="value" id="sd-free">-</span></div>
@@ -422,27 +788,207 @@
           </div>
         </div>
 
-        <div class="card glass-panel">
-          <h3>⚙️ Settings</h3>
-          <button class="btn btn-primary" style="width:100%; margin-bottom: 0.5rem" onclick="exportSettings()">💾
-            Export</button>
-          <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <input type="file" id="import-file" class="form-control" accept=".json" style="flex: 1">
-            <button class="btn" onclick="importSettings()">📥 Import</button>
+        <div style="display: flex; flex-direction: column; gap: 1rem; justify-content: flex-start;">
+          <div class="card glass-panel" style="margin: 0;">
+            <h3>Customization</h3>
+            <div class="input-group">
+              <span class="input-label">Theme Accent Color</span>
+              <div style="display:flex; gap:0.5rem; align-items:center;">
+                <input type="color" id="theme-color-picker" value="#3b82f6"
+                  style="padding:0; border:none; width:40px; height:40px; border-radius:4px; cursor:pointer;"
+                  onchange="updateThemeColor(this.value)">
+                <button class="btn" style="flex:1" onclick="updateThemeColor('#3b82f6')">Reset</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card glass-panel" style="margin: 0;">
+            <h3>Settings</h3>
+            <button class="btn btn-primary" style="width:100%; margin-bottom: 0.5rem"
+              onclick="exportSettings()">Export</button>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <input type="file" id="import-file" class="form-control" accept=".json" style="flex: 1">
+              <button class="btn" onclick="importSettings()">Import</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card glass-panel" style="grid-column: 1 / -1; border-top: 2px solid var(--primary);">
+          <h3>Integrations</h3>
+          <div class="grid">
+            <!-- MQTT Config -->
+            <div style="padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
+              <h4 style="margin-top: 0;">MQTT & Home Assistant</h4>
+              <div class="kv-group" style="margin-bottom:1rem;">
+                <span class="label">Status</span>
+                <span class="value" id="mqtt-status" style="font-weight:bold;">Offline</span>
+              </div>
+              <div class="kv-group">
+                <span>Enable MQTT</span>
+                <input type="checkbox" id="inp-mqtt-en" onchange="saveIntegrations()">
+              </div>
+              <div class="input-group">
+                <span class="input-label">Broker IP/Hostname</span>
+                <input type="text" id="inp-mqtt-broker" class="form-control" placeholder="192.168.1.100"
+                  onchange="saveIntegrations()">
+              </div>
+              <div class="input-group">
+                <span class="input-label">Port</span>
+                <input type="number" id="inp-mqtt-port" class="form-control" placeholder="1883"
+                  onchange="saveIntegrations()">
+              </div>
+              <div class="input-group">
+                <span class="input-label">Username (Optional)</span>
+                <input type="text" id="inp-mqtt-user" class="form-control" onchange="saveIntegrations()">
+              </div>
+              <div class="input-group">
+                <span class="input-label">Password (Optional)</span>
+                <input type="password" id="inp-mqtt-pass" class="form-control" onchange="saveIntegrations()">
+              </div>
+            </div>
+
+            <!-- Telegram Config -->
+            <div style="padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
+              <h4 style="margin-top: 0;">Telegram Bot</h4>
+              <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom: 1rem;">Sends a snapshot photo when
+                motion is detected.</p>
+
+              <div class="kv-group">
+                <span>Enable Telegram</span>
+                <input type="checkbox" id="inp-tg-en" onchange="saveIntegrations()">
+              </div>
+              <div class="input-group">
+                <span class="input-label">Bot Token</span>
+                <input type="password" id="inp-tg-token" class="form-control"
+                  placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" onchange="saveIntegrations()">
+              </div>
+              <div class="input-group">
+                <span class="input-label">Chat ID</span>
+                <input type="text" id="inp-tg-chat" class="form-control" placeholder="123456789"
+                  onchange="saveIntegrations()">
+              </div>
+            </div>
+
+            <!-- Google Drive Config -->
+            <div style="padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
+              <h4 style="margin-top: 0;">Google Drive Backup</h4>
+              <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom: 1rem;">Uploads snapshot to Drive when
+                motion is detected via Apps Script.</p>
+              <div class="kv-group">
+                <span>Enable G-Drive</span>
+                <input type="checkbox" id="inp-gd-en" onchange="saveIntegrations()">
+              </div>
+              <div class="input-group">
+                <span class="input-label">Apps Script Web App URL</span>
+                <input type="password" id="inp-gd-url" class="form-control"
+                  placeholder="https://script.google.com/macros/s/.../exec" onchange="saveIntegrations()">
+              </div>
+              <hr style="border:0; height:1px; background:var(--glass-border); margin:0.75rem 0;">
+              <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.5rem; font-weight:600;">Backup Triggers</div>
+              <div class="kv-group">
+                <span>Motion Snapshot</span>
+                <input type="checkbox" id="inp-gd-motion" onchange="saveIntegrations()" checked>
+              </div>
+              <div class="kv-group">
+                <span>Settings Backup</span>
+                <input type="checkbox" id="inp-gd-settings" onchange="saveGDrivePrefs()">
+              </div>
+              <div class="kv-group">
+                <span>Local UI Storage Backup</span>
+                <input type="checkbox" id="inp-gd-localstorage" onchange="saveGDrivePrefs()">
+              </div>
+              <button class="btn" style="width:100%; margin-top:0.5rem; font-size:0.8rem;" onclick="manualGDriveBackup()">Backup Now</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card glass-panel" style="grid-column: 1 / -1; border-top: 2px solid var(--primary);">
+          <h3>Advanced Services & Localization</h3>
+          <div class="grid">
+            <!-- WebDAV -->
+            <div style="padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
+              <h4 style="margin-top: 0;">WebDAV Server</h4>
+              <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom: 1rem;">Mount SD Card as a Network
+                Drive in Windows Explorer (\\ip\webdav).</p>
+              <div class="kv-group">
+                <span>Enable WebDAV</span>
+                <input type="checkbox" id="inp-webdav-en" onchange="saveIntegrations()">
+              </div>
+            </div>
+
+            <!-- Time/NTP -->
+            <div style="padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
+              <h4 style="margin-top: 0;">Time Sync (NTP)</h4>
+              <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom: 1rem;">Localize recording timestamps.
+              </p>
+              <div class="input-group">
+                <span class="input-label">NTP Server</span>
+                <input type="text" id="inp-ntp-server" class="form-control" placeholder="pool.ntp.org"
+                  onchange="saveIntegrations()">
+              </div>
+              <div class="input-group">
+                <span class="input-label">POSIX Timezone (<a
+                    href="https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv" target="_blank"
+                    style="color:var(--primary)">lookup</a>)</span>
+                <input type="text" id="inp-tz" class="form-control" placeholder="UTC0" onchange="saveIntegrations()">
+              </div>
+            </div>
+
+            <!-- Continuous Recording -->
+            <div style="padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
+              <h4 style="margin-top: 0;">Continuous Recording</h4>
+              <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom: 1rem;">Record non-stop chunks to SD.
+              </p>
+              <div class="kv-group">
+                <span>Enable Continuous Recording</span>
+                <input type="checkbox" id="inp-cont-rec" onchange="saveIntegrations()">
+              </div>
+              <div class="input-group">
+                <span class="input-label">Chunk Size (Minutes)</span>
+                <input type="number" id="inp-cont-chunk" class="form-control" min="1" max="60" placeholder="5"
+                  onchange="saveIntegrations()">
+              </div>
+            </div>
           </div>
         </div>
 
         <div class="card glass-panel">
-          <h3>🔧 Power</h3>
-          <button class="btn" style="margin-bottom:0.5rem; width:100%" onclick="window.open('/api/sd/list','_blank')">📂
-            Browse SD</button>
+          <h3>Power</h3>
           <button class="btn" style="margin-bottom:0.5rem; width:100%"
-            onclick="api('/api/time',{method:'POST',body:JSON.stringify({epoch:Math.floor(Date.now()/1000)})}).then(()=>alert('Synced!'))">🕒
-            Sync Time</button>
-          <button class="btn" style="margin-bottom:0.5rem; width:100%" onclick="updateSDInfo()">🔄 Refresh SD</button>
+            onclick="window.open('/api/sd/list','_blank')">Browse SD</button>
+          <button class="btn" style="margin-bottom:0.5rem; width:100%"
+            onclick="api('/api/time',{method:'POST',body:JSON.stringify({epoch:Math.floor(Date.now()/1000)})}).then(()=>alert('Synced!'))">Sync
+            Time</button>
+          <button class="btn" style="margin-bottom:0.5rem; width:100%" onclick="updateSDInfo()">Refresh SD</button>
           <button class="btn" style="color:var(--danger); border-color:rgba(239,68,68,0.3); width:100%"
-            onclick="if(confirm('Reboot?')) api('/reboot',{method:'POST'}).then(()=>alert('Rebooting...'))">🔄
-            Reboot</button>
+            onclick="if(confirm('Reboot?')) api('/reboot',{method:'POST'}).then(()=>showToast('Rebooting...'))">Reboot</button>
+        </div>
+
+        <!-- Creator Attribution -->
+        <div class="card glass-panel"
+          style="grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 1.5rem 1rem; margin-top: 1rem;">
+          <h4 style="margin-bottom: 0.25rem; border: none; padding: 0;">Built with ❤️ by <span
+              style="color: var(--primary);">John Varghese (J0X)</span></h4>
+          <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0;">Advanced ESP32-CAM ONVIF/RTSP/AI
+            Ecosystem</p>
+          <div style="display: flex; gap: 1rem; margin-top: 1rem; flex-wrap: wrap; justify-content: center;">
+            <a href="https://github.com/John-Varghese-EH" target="_blank" class="btn"
+              style="text-decoration: none; display: flex; align-items: center; gap: 6px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
+              GitHub
+            </a>
+            <a href="https://linkedin.com/in/john--varghese" target="_blank" class="btn"
+              style="text-decoration: none; display: flex; align-items: center; gap: 6px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z" />
+              </svg>
+              LinkedIn
+            </a>
+          </div>
         </div>
       </div>
     </div>

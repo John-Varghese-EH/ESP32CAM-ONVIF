@@ -165,7 +165,7 @@ void BluetoothManager::startScan() {
 }
 
 bool BluetoothManager::isUserPresent() {
-    if (!appSettings.btPresenceMac.length()) return true; 
+    if (strlen(appSettings.btPresenceMac) == 0) return true; 
     return _userPresent;
 }
 

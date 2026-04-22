@@ -15,8 +15,12 @@
 #include "wifi_manager.h"
 #include "config.h"
 #include <Update.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <esp_task_wdt.h>
 #include "sd_recorder.h"
+#include "mqtt_manager.h"
+#include "webdav_server.h"
 #ifdef BLUETOOTH_ENABLED
   #include "bluetooth_manager.h"
   #include "audio_manager.h"
@@ -31,14 +35,51 @@
 
 WebServer webConfigServer(WEB_PORT);
 
-// WEB_USER and WEB_PASS are defined in config.h
+// Shared JSON response buffer (single-threaded, reused across API handlers)
+// Eliminates heap fragmentation from String concatenation
+static char s_jsonBuf[1024];
 
+// === SECURITY: Rate limiting ===
+#define MAX_AUTH_FAILURES 5
+#define AUTH_LOCKOUT_MS   60000  // 60 second lockout
+static int s_authFailures = 0;
+static unsigned long s_lockoutStart = 0;
+
+// === SECURITY: Stream connection guard ===
+static volatile bool s_streamActive = false;
+
+// === Performance: Heap low-water mark ===
+static uint32_t s_minFreeHeap = UINT32_MAX;
+
+
+// Add security headers to prevent XSS, clickjacking, MIME sniffing
+static void addSecurityHeaders() {
+    webConfigServer.sendHeader("X-Content-Type-Options", "nosniff");
+    webConfigServer.sendHeader("X-Frame-Options", "SAMEORIGIN");
+    webConfigServer.sendHeader("X-XSS-Protection", "1; mode=block");
+    webConfigServer.sendHeader("Cache-Control", "no-store");
+}
 
 bool isAuthenticated(WebServer &server) {
+    // Rate limiting: lockout after repeated failures
+    if (s_authFailures >= MAX_AUTH_FAILURES) {
+        if (millis() - s_lockoutStart < AUTH_LOCKOUT_MS) {
+            server.send(429, "text/plain", "Too many attempts. Try again later.");
+            return false;
+        }
+        s_authFailures = 0;  // Reset after lockout period
+    }
     if (!server.authenticate(WEB_USER, WEB_PASS)) {
+        s_authFailures++;
+        if (s_authFailures >= MAX_AUTH_FAILURES) {
+            s_lockoutStart = millis();
+            Serial.println(F("[SECURITY] Auth lockout triggered"));
+        }
         server.requestAuthentication();
         return false;
     }
+    s_authFailures = 0;  // Reset on success
+    addSecurityHeaders();
     return true;
 }
 
@@ -53,26 +94,44 @@ void web_config_start() {
         if (!webConfigServer.authenticate(WEB_USER, WEB_PASS)) {
            return webConfigServer.requestAuthentication();
         }
-        webConfigServer.send_P(200, "text/html", index_html);
+        webConfigServer.sendHeader("Content-Encoding", "gzip");
+        webConfigServer.send_P(200, "text/html", (const char*)index_html_gz, index_html_gz_len);
     });
 
     // --- API ENDPOINTS ---
     webConfigServer.on("/api/status", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
-        String json = "{";
-        json += "\"status\":\"Online\",";
-        json += "\"rtsp\":\"" + getRTSPUrl() + "\",";
-        json += "\"onvif\":\"http://" + WiFi.localIP().toString() + ":" + String(ONVIF_PORT) + "/onvif/device_service\",";
-        json += "\"onvif_enabled\":" + String(onvif_is_enabled() ? "true" : "false") + ",";
-        json += "\"motion\":" + String(motion_detected() ? "true" : "false") + ",";
-        json += "\"recording\":" + String(sd_recorder_is_recording() ? "true" : "false") + ",";
-        json += "\"sd_mounted\":" + String(sd_recorder_is_mounted() ? "true" : "false") + ",";
-        json += "\"heap\":" + String(ESP.getFreeHeap()) + ",";
-        json += "\"uptime\":" + String(millis() / 1000) + ",";
-        json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
-        json += "\"autoflash\":" + String(auto_flash_is_enabled() ? "true" : "false");
-        json += "}";
-        webConfigServer.send(200, "application/json", json);
+        uint32_t freeHeap = ESP.getFreeHeap();
+        uint32_t maxBlock = ESP.getMaxAllocHeap();
+        snprintf(s_jsonBuf, sizeof(s_jsonBuf),
+            "{\"status\":\"Online\","
+            "\"rtsp\":\"%s\","
+            "\"onvif\":\"http://%s:%d/onvif/device_service\","
+            "\"onvif_enabled\":%s,"
+            "\"motion\":%s,"
+            "\"recording\":%s,"
+            "\"sd_mounted\":%s,"
+            "\"heap\":%u,"
+            "\"max_block\":%u,"
+            "\"min_heap\":%u,"
+            "\"psram_free\":%u,"
+            "\"uptime\":%lu,"
+            "\"rssi\":%d,"
+            "\"autoflash\":%s}",
+            getRTSPUrl().c_str(),
+            WiFi.localIP().toString().c_str(), ONVIF_PORT,
+            onvif_is_enabled() ? "true" : "false",
+            motion_detected() ? "true" : "false",
+            sd_recorder_is_recording() ? "true" : "false",
+            sd_recorder_is_mounted() ? "true" : "false",
+            freeHeap,
+            maxBlock,
+            s_minFreeHeap,
+            ESP.getFreePsram(),
+            millis() / 1000,
+            WiFi.RSSI(),
+            auto_flash_is_enabled() ? "true" : "false");
+        webConfigServer.send(200, "application/json", s_jsonBuf);
     });
 
     // --- Change Camera Settings ---
@@ -224,11 +283,19 @@ void web_config_start() {
         webConfigServer.send(200, "application/json", "{}");
     });
 
-    // --- Reboot ---
+    // --- Reboot (GET - legacy) ---
     webConfigServer.on("/reboot", []() {
         if (!isAuthenticated(webConfigServer)) return;
         webConfigServer.send(200, "application/json", "{\"ok\":1, \"msg\":\"Rebooting...\"}");
-        delay(1000);
+        delay(500);
+        ESP.restart();
+    });
+
+    // --- Reboot (POST - proper REST API) ---
+    webConfigServer.on("/api/reboot", HTTP_POST, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        webConfigServer.send(200, "application/json", "{\"ok\":1, \"msg\":\"Rebooting...\"}");
+        delay(500);
         ESP.restart();
     });
 
@@ -240,14 +307,191 @@ void web_config_start() {
         ESP.restart();
     });
 
-    // --- System Information (Enhanced with RSSI, FPS, etc.) ---
+    // --- OTA Update (WebUI Upload) ---
+    webConfigServer.on("/api/update", HTTP_POST, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        webConfigServer.sendHeader("Connection", "close");
+        webConfigServer.send(200, "application/json", Update.hasError() ? "{\"ok\":0,\"msg\":\"Update failed\"}" : "{\"ok\":1,\"msg\":\"Update successful. Rebooting...\"}");
+        if (!Update.hasError()) {
+            delay(1000);
+            ESP.restart();
+        }
+    }, []() {
+        if (!webConfigServer.authenticate(WEB_USER, WEB_PASS)) return;
+        HTTPUpload& upload = webConfigServer.upload();
+        if (upload.status == UPLOAD_FILE_START) {
+            Serial.printf("[OTA] Update Start: %s\n", upload.filename.c_str());
+            if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_WRITE) {
+            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_END) {
+            if (Update.end(true)) {
+                Serial.printf("[OTA] Update Success: %u bytes\n", upload.totalSize);
+            } else {
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_ABORTED) {
+            Update.end();
+            Serial.println("[OTA] Update was aborted");
+        }
+        delay(0);
+    });
+
+    // --- GitHub Auto Updates Globals ---
+    static String s_latest_version = "";
+    static String s_download_url = "";
+    static volatile int s_ota_progress = 0; // 0-100, or -1 for error
+    static String s_ota_msg = "";
+
+    // --- GitHub Check ---
+    webConfigServer.on("/api/update/check", HTTP_GET, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        
+        Serial.println("[OTA] Fetching latest release from GitHub...");
+        WiFiClientSecure client;
+        client.setInsecure();
+        HTTPClient http;
+        
+        const char* repoApi = "https://api.github.com/repos/John-Varghese-EH/ESP32CAM-ONVIF/releases/latest";
+        if (http.begin(client, repoApi)) {
+            int httpCode = http.GET();
+            if (httpCode == HTTP_CODE_OK) {
+                String payload = http.getString();
+                
+                // Extract version tag
+                String latestVer = "";
+                int tagStart = payload.indexOf("\"tag_name\":");
+                if (tagStart > 0) {
+                    tagStart = payload.indexOf("\"", tagStart + 11) + 1;
+                    int tagEnd = payload.indexOf("\"", tagStart);
+                    latestVer = payload.substring(tagStart, tagEnd);
+                }
+                
+                // Extract download URL
+                String firmwareUrl = "";
+                int urlStart = payload.indexOf("\"browser_download_url\":");
+                if (urlStart > 0) {
+                    urlStart = payload.indexOf("\"", urlStart + 23) + 1;
+                    int urlEnd = payload.indexOf("\"", urlStart);
+                    firmwareUrl = payload.substring(urlStart, urlEnd);
+                }
+                
+                http.end();
+                
+                s_latest_version = latestVer;
+                s_download_url = firmwareUrl;
+                
+                String json = "{\"current_version\":\"" FIRMWARE_VERSION "\",\"latest_version\":\"" + latestVer + "\",\"download_url\":\"" + firmwareUrl + "\"}";
+                webConfigServer.send(200, "application/json", json);
+            } else {
+                http.end();
+                webConfigServer.send(200, "application/json", "{\"error\":\"Failed to fetch GitHub release\"}");
+            }
+        } else {
+            webConfigServer.send(200, "application/json", "{\"error\":\"Connection failed\"}");
+        }
+    });
+
+    // --- GitHub Install ---
+    webConfigServer.on("/api/update/github", HTTP_POST, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        
+        StaticJsonDocument<256> doc;
+        deserializeJson(doc, webConfigServer.arg("plain"));
+        String url = doc["url"].as<String>();
+        
+        if (url == "") url = s_download_url;
+        
+        if (url == "") {
+            webConfigServer.send(200, "application/json", "{\"error\":\"No download URL provided\"}");
+            return;
+        }
+        
+        s_ota_progress = 0;
+        s_ota_msg = "Downloading firmware...";
+        
+        // Start background FreeRTOS task for downloading
+        // We must duplicate the string so it survives
+        char* url_copy = strdup(url.c_str());
+        xTaskCreatePinnedToCore([](void* pvParam) {
+            char* downloadUrl = (char*)pvParam;
+            
+            WiFiClientSecure client;
+            client.setInsecure();
+            HTTPClient http;
+            
+            if (http.begin(client, downloadUrl)) {
+                http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+                int fwCode = http.GET();
+                if (fwCode == HTTP_CODE_OK) {
+                    int contentLength = http.getSize();
+                    bool canBegin = Update.begin(contentLength);
+                    if (canBegin) {
+                        WiFiClient* stream = http.getStreamPtr();
+                        size_t written = 0;
+                        uint8_t buf[1024];
+                        while (http.connected() && (written < contentLength)) {
+                            size_t available = stream->available();
+                            if (available) {
+                                size_t toRead = (available > sizeof(buf)) ? sizeof(buf) : available;
+                                size_t c = stream->readBytes(buf, toRead);
+                                Update.write(buf, c);
+                                written += c;
+                                
+                                s_ota_progress = (int)((written * 100) / contentLength);
+                                if (s_ota_progress > 99) s_ota_progress = 99; // Cap at 99 until end
+                            }
+                            delay(1);
+                        }
+                        
+                        if (written == contentLength && Update.end()) {
+                            s_ota_progress = 100;
+                            s_ota_msg = "Rebooting...";
+                            delay(1000);
+                            ESP.restart();
+                        } else {
+                            s_ota_progress = -1;
+                            s_ota_msg = "Write failed";
+                        }
+                    } else {
+                        s_ota_progress = -1;
+                        s_ota_msg = "Not enough space";
+                    }
+                } else {
+                    s_ota_progress = -1;
+                    s_ota_msg = "HTTP GET failed";
+                }
+                http.end();
+            } else {
+                s_ota_progress = -1;
+                s_ota_msg = "Connection failed";
+            }
+            free(downloadUrl);
+            vTaskDelete(NULL);
+        }, "github_ota_task", 8192, url_copy, 1, NULL, 1);
+        
+        webConfigServer.send(200, "application/json", "{\"success\":true}");
+    });
+
+    // --- GitHub Status ---
+    webConfigServer.on("/api/update/status", HTTP_GET, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        
+        String json = "{\"progress\":" + String(s_ota_progress) + ",\"message\":\"" + s_ota_msg + "\"}";
+        webConfigServer.send(200, "application/json", json);
+    });
+
     webConfigServer.on("/api/system/info", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
         
         sensor_t * s = esp_camera_sensor_get();
         framesize_t res = s->status.framesize;
         
-        String resolution = "Unknown";
+        const char* resolution = "Custom";
         switch(res) {
             case FRAMESIZE_QQVGA: resolution = "QQVGA (160x120)"; break;
             case FRAMESIZE_QVGA:  resolution = "QVGA (320x240)"; break;
@@ -256,45 +500,44 @@ void web_config_start() {
             case FRAMESIZE_HD:    resolution = "HD (1280x720)"; break;
             case FRAMESIZE_SXGA:  resolution = "SXGA (1280x1024)"; break;
             case FRAMESIZE_UXGA:  resolution = "UXGA (1600x1200)"; break;
-            default: resolution = "Custom"; break;
+            default: break;
         }
         
-        String codec = "MJPEG";
+        const char* codec = "MJPEG";
         #ifdef VIDEO_CODEC_H264
             codec = "H.264";
         #endif
         
-        int rssi = WiFi.RSSI();
-        
-        // Get flash partition info
         size_t flash_size = ESP.getFlashChipSize();
         size_t sketch_size = ESP.getSketchSize();
-        size_t free_flash = flash_size - sketch_size;
-        
-        // PSRAM info (if available)
-        size_t psram_size = 0;
-        size_t psram_free = 0;
+        size_t psram_size = 0, psram_free = 0;
         #ifdef BOARD_HAS_PSRAM
             psram_size = ESP.getPsramSize();
             psram_free = ESP.getFreePsram();
         #endif
         
-        String json = "{";
-        json += "\"rssi\":" + String(rssi) + ",";
-        json += "\"resolution\":\"" + resolution + "\",";
-        json += "\"codec\":\"" + codec + "\",";
-        json += "\"quality\":" + String(s->status.quality) + ",";
-        json += "\"brightness\":" + String(s->status.brightness) + ",";
-        json += "\"contrast\":" + String(s->status.contrast) + ",";
-        json += "\"saturation\":" + String(s->status.saturation) + ",";
-        json += "\"flash_total\":" + String(flash_size) + ",";
-        json += "\"flash_used\":" + String(sketch_size) + ",";
-        json += "\"flash_free\":" + String(free_flash) + ",";
-        json += "\"psram_total\":" + String(psram_size) + ",";
-        json += "\"psram_free\":" + String(psram_free);
-        json += "}";
+        // Build JSON with snprintf — zero heap allocations
+        static char infoBuf[512];
+        snprintf(infoBuf, sizeof(infoBuf),
+            "{\"rssi\":%d,"
+            "\"resolution\":\"%s\","
+            "\"codec\":\"%s\","
+            "\"quality\":%d,"
+            "\"brightness\":%d,"
+            "\"contrast\":%d,"
+            "\"saturation\":%d,"
+            "\"flash_total\":%u,"
+            "\"flash_used\":%u,"
+            "\"flash_free\":%u,"
+            "\"psram_total\":%u,"
+            "\"psram_free\":%u}",
+            WiFi.RSSI(), resolution, codec,
+            s->status.quality, s->status.brightness,
+            s->status.contrast, s->status.saturation,
+            flash_size, sketch_size, flash_size - sketch_size,
+            psram_size, psram_free);
         
-        webConfigServer.send(200, "application/json", json);
+        webConfigServer.send(200, "application/json", infoBuf);
     });
     
     // --- Camera Quality Presets ---
@@ -420,7 +663,7 @@ void web_config_start() {
         json += ",\"bluetooth\":{";
         json += "\"enabled\":" + String(appSettings.btEnabled ? "true" : "false") + ",";
         json += "\"stealth\":" + String(appSettings.btStealthMode ? "true" : "false") + ",";
-        json += "\"mac\":\"" + appSettings.btPresenceMac + "\",";
+        json += "\"mac\":\"" + String(appSettings.btPresenceMac) + "\",";
         json += "\"timeout\":" + String(appSettings.btPresenceTimeout) + ",";
         json += "\"gain\":" + String(appSettings.btMicGain) + ",";
         json += "\"audioSource\":" + String(appSettings.audioSource);
@@ -477,7 +720,7 @@ void web_config_start() {
             JsonObject bt = doc["bluetooth"];
             if (bt.containsKey("enabled")) appSettings.btEnabled = bt["enabled"];
             if (bt.containsKey("stealth")) appSettings.btStealthMode = bt["stealth"];
-            if (bt.containsKey("mac")) appSettings.btPresenceMac = bt["mac"].as<String>();
+            if (bt.containsKey("mac")) strncpy(appSettings.btPresenceMac, bt["mac"] | "", sizeof(appSettings.btPresenceMac) - 1);
             if (bt.containsKey("timeout")) appSettings.btPresenceTimeout = bt["timeout"];
             if (bt.containsKey("gain")) appSettings.btMicGain = bt["gain"];
             if (bt.containsKey("audioSource")) appSettings.audioSource = (AudioSource)bt["audioSource"].as<int>();
@@ -590,21 +833,23 @@ void web_config_start() {
     });
 
     // ==================== EVENT LOG ====================
-    #define MAX_EVENTS 100
+    #define MAX_EVENTS 50
     struct LogEvent {
         unsigned long timestamp;
-        String type;
-        String message;
+        char type[12];       // "boot", "motion", "error", etc. (was heap-allocated String)
+        char message[64];    // Fixed buffer, no heap fragmentation (was heap-allocated String)
     };
     static LogEvent eventLog[MAX_EVENTS];
     static int eventCount = 0;
     static int eventIndex = 0;
     
     // Helper to add event
-    auto addEvent = [](String type, String message) {
+    auto addEvent = [](const char* type, const char* message) {
         eventLog[eventIndex].timestamp = millis();
-        eventLog[eventIndex].type = type;
-        eventLog[eventIndex].message = message;
+        strncpy(eventLog[eventIndex].type, type, sizeof(eventLog[eventIndex].type) - 1);
+        eventLog[eventIndex].type[sizeof(eventLog[eventIndex].type) - 1] = '\0';
+        strncpy(eventLog[eventIndex].message, message, sizeof(eventLog[eventIndex].message) - 1);
+        eventLog[eventIndex].message[sizeof(eventLog[eventIndex].message) - 1] = '\0';
         eventIndex = (eventIndex + 1) % MAX_EVENTS;
         if (eventCount < MAX_EVENTS) eventCount++;
     };
@@ -621,8 +866,8 @@ void web_config_start() {
             if (i > 0) json += ",";
             json += "{";
             json += "\"timestamp\":" + String(eventLog[idx].timestamp) + ",";
-            json += "\"type\":\"" + eventLog[idx].type + "\",";
-            json += "\"message\":\"" + eventLog[idx].message + "\"";
+            json += "\"type\":\"" + String(eventLog[idx].type) + "\",";
+            json += "\"message\":\"" + String(eventLog[idx].message) + "\"";
             json += "}";
         }
         
@@ -715,15 +960,10 @@ void web_config_start() {
     // --- Ping Test ---
     webConfigServer.on("/api/network/ping", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
-        
-        unsigned long timestamp = millis();
-        String json = "{";
-        json += "\"timestamp\":" + String(timestamp) + ",";
-        json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
-        json += "\"ip\":\"" + WiFi.localIP().toString() + "\"";
-        json += "}";
-        
-        webConfigServer.send(200, "application/json", json);
+        snprintf(s_jsonBuf, sizeof(s_jsonBuf),
+            "{\"timestamp\":%lu,\"rssi\":%d,\"ip\":\"%s\"}",
+            millis(), WiFi.RSSI(), WiFi.localIP().toString().c_str());
+        webConfigServer.send(200, "application/json", s_jsonBuf);
     });
     
     // --- Bandwidth Test ---
@@ -758,44 +998,16 @@ void web_config_start() {
              webConfigServer.send(400, "application/json", "{\"error\":\"Invalid time\"}");
         }
     });
-
-    // --- OTA Firmware Update ---
-    webConfigServer.on("/api/update", HTTP_POST, []() {
-        webConfigServer.send(200, "application/json", (Update.hasError()) ? "{\"success\":false}" : "{\"success\":true}");
-        delay(1000);
-        ESP.restart();
-    }, []() {
-        HTTPUpload& upload = webConfigServer.upload();
-        if (upload.status == UPLOAD_FILE_START) {
-            Serial.printf("[INFO] Update: %s\n", upload.filename.c_str());
-            if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { 
-                Update.printError(Serial);
-            }
-        } else if (upload.status == UPLOAD_FILE_WRITE) {
-            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-                Update.printError(Serial);
-            }
-        } else if (upload.status == UPLOAD_FILE_END) {
-            if (Update.end(true)) { 
-                Serial.printf("[INFO] Update Success: %u\n", upload.totalSize);
-            } else {
-                Update.printError(Serial);
-            }
-        }
-    });
-    
     // --- WiFi API Endpoints ---
     webConfigServer.on("/api/wifi/status", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
-        
-        String json = "{";
-        json += "\"connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
-        json += "\"ssid\":\"" + wifiManager.getSSID() + "\",";
-        json += "\"ip\":\"" + wifiManager.getLocalIP().toString() + "\",";
-        json += "\"mode\":\"" + String(wifiManager.isInAPMode() ? "AP" : "STA") + "\"";
-        json += "}";
-        
-        webConfigServer.send(200, "application/json", json);
+        snprintf(s_jsonBuf, sizeof(s_jsonBuf),
+            "{\"connected\":%s,\"ssid\":\"%s\",\"ip\":\"%s\",\"mode\":\"%s\"}",
+            WiFi.status() == WL_CONNECTED ? "true" : "false",
+            wifiManager.getSSID().c_str(),
+            wifiManager.getLocalIP().toString().c_str(),
+            wifiManager.isInAPMode() ? "AP" : "STA");
+        webConfigServer.send(200, "application/json", s_jsonBuf);
     });
     
     webConfigServer.on("/api/wifi/scan", HTTP_GET, []() {
@@ -808,7 +1020,7 @@ void web_config_start() {
         for (int i = 0; i < networksFound; i++) {
             if (i > 0) json += ",";
             json += "{";
-            json += "\"ssid\":\"" + networks[i].ssid + "\",";
+            json += "\"ssid\":\"" + String(networks[i].ssid) + "\",";
             json += "\"rssi\":" + String(networks[i].rssi) + ",";
             json += "\"encType\":" + String(networks[i].encType);
             json += "}";
@@ -854,11 +1066,20 @@ void web_config_start() {
     // === STREAM ENDPOINT ===
     webConfigServer.on("/stream", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
+        
+        // Guard: only one concurrent stream client
+        if (s_streamActive) {
+            webConfigServer.send(503, "text/plain", "Stream busy - another client is connected");
+            return;
+        }
+        s_streamActive = true;
+        
         WiFiClient client = webConfigServer.client();
         
+        // Security: restrict CORS to same-origin (removed wildcard)
         String response = "HTTP/1.1 200 OK\r\n";
         response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n";
-        response += "Access-Control-Allow-Origin: *\r\n";
+        response += "X-Content-Type-Options: nosniff\r\n";
         response += "\r\n";
         client.print(response);
 
@@ -900,18 +1121,31 @@ void web_config_start() {
             
             size_t dataLen = fb->len; // Cache before releasing!
             size_t hlen = client.printf("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n", dataLen);
-            size_t wlen = client.write(fb->buf, dataLen);
+            
+            // Implement chunked write to prevent WiFiClient buffer drops on large frames
+            size_t wlen = 0;
+            const size_t chunkSize = 2048;
+            for (size_t i = 0; i < dataLen; i += chunkSize) {
+                size_t toWrite = (dataLen - i < chunkSize) ? (dataLen - i) : chunkSize;
+                size_t written = client.write(fb->buf + i, toWrite);
+                if (written != toWrite) {
+                    break;
+                }
+                wlen += written;
+            }
+            
             client.print("\r\n");
             
             esp_camera_fb_return(fb); // Release immediately
             
             if (wlen != dataLen) {
-                 Serial.println("[WARN] Stream write failed (Client disconnected?)");
+                 Serial.printf("[WARN] Stream write failed (Sent %u of %u bytes). Client disconnected?\n", wlen, dataLen);
                  break;
             }
         }
         
         Serial.println("[INFO] MJPEG Stream stopped");
+        s_streamActive = false;
     });
 
     // --- Snapshot endpoint ---
@@ -934,7 +1168,7 @@ void web_config_start() {
         String json = "{";
         json += "\"enabled\":" + String(appSettings.btEnabled ? "true" : "false") + ",";
         json += "\"stealth\":" + String(appSettings.btStealthMode ? "true" : "false") + ",";
-        json += "\"mac\":\"" + appSettings.btPresenceMac + "\",";
+        json += "\"mac\":\"" + String(appSettings.btPresenceMac) + "\",";
         json += "\"userPresent\":" + String(btManager.isUserPresent() ? "true" : "false") + ",";
         json += "\"audioSource\":" + String(appSettings.audioSource) + ",";
         json += "\"gain\":" + String(appSettings.btMicGain) + ",";
@@ -954,7 +1188,7 @@ void web_config_start() {
         
         if(doc.containsKey("enabled")) appSettings.btEnabled = doc["enabled"];
         if(doc.containsKey("stealth")) appSettings.btStealthMode = doc["stealth"];
-        if(doc.containsKey("mac")) appSettings.btPresenceMac = doc["mac"].as<String>();
+        if(doc.containsKey("mac")) strncpy(appSettings.btPresenceMac, doc["mac"] | "", sizeof(appSettings.btPresenceMac) - 1);
         if(doc.containsKey("gain")) appSettings.btMicGain = doc["gain"];
         if(doc.containsKey("timeout")) appSettings.btPresenceTimeout = doc["timeout"];
         if(doc.containsKey("audioSource")) {
@@ -979,10 +1213,329 @@ void web_config_start() {
     });
     #endif // BLUETOOTH_ENABLED
     
+    // === OTA Backend State & Preparation ===
+    static volatile int ota_progress = -1;
+    static String ota_status_msg = "";
+
+    auto prepare_for_ota = []() {
+        Serial.println("[OTA] Preparing for OTA: Stopping services to free memory...");
+        sd_recorder_stop_manual();
+        // Stop camera to free massive framebuffers back to PSRAM/Heap
+        esp_camera_deinit();
+        delay(500); 
+    };
+
+    // === GitHub Background OTA Task ===
+    auto otaGithubTask = [](void *pvParameters) {
+        String url = String((char *)pvParameters);
+        free(pvParameters);
+        
+        ota_progress = 0;
+        ota_status_msg = "Connecting to GitHub...";
+        
+        WiFiClientSecure client;
+        client.setInsecure();
+        HTTPClient https;
+        https.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+        https.setTimeout(30000); 
+        
+        if (https.begin(client, url)) {
+            int httpCode = https.GET();
+            if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+                int contentLength = https.getSize();
+                if (contentLength <= 0) {
+                    ota_status_msg = "Invalid content length";
+                    ota_progress = -2;
+                    https.end();
+                    vTaskDelete(NULL);
+                    return;
+                }
+                
+                if (Update.begin(contentLength, U_FLASH)) {
+                    ota_status_msg = "Downloading firmware...";
+                    WiFiClient *stream = https.getStreamPtr();
+                    
+                    uint8_t buff[1024];
+                    size_t written = 0;
+                    unsigned long lastDataTime = millis();
+                    
+                    while (https.connected() && written < contentLength) {
+                        size_t available = stream->available();
+                        if (available) {
+                            int c = stream->readBytes(buff, ((available > sizeof(buff)) ? sizeof(buff) : available));
+                            Update.write(buff, c);
+                            written += c;
+                            
+                            ota_progress = (written * 100) / contentLength;
+                            lastDataTime = millis();
+                            
+                            esp_task_wdt_reset();
+                            yield();
+                        } else {
+                            if (millis() - lastDataTime > 15000) {
+                                ota_status_msg = "Download timeout";
+                                ota_progress = -2;
+                                break;
+                            }
+                            delay(10);
+                        }
+                    }
+                    
+                    if (written == contentLength) {
+                        if (Update.end(true)) {
+                            ota_progress = 100;
+                            ota_status_msg = "Update Complete. Rebooting...";
+                            delay(1000);
+                            ESP.restart();
+                        } else {
+                            ota_status_msg = "Update failed on end()";
+                            ota_progress = -2;
+                        }
+                    } else {
+                        ota_status_msg = "Download incomplete";
+                        ota_progress = -2;
+                        Update.abort();
+                    }
+                } else {
+                    ota_status_msg = "Not enough space for OTA";
+                    ota_progress = -2;
+                }
+            } else {
+                ota_status_msg = "Failed to download (HTTP " + String(httpCode) + ")";
+                ota_progress = -2;
+            }
+            https.end();
+        } else {
+            ota_status_msg = "Unable to connect to GitHub";
+            ota_progress = -2;
+        }
+        
+        vTaskDelete(NULL);
+    };
+
+    // === OTA Firmware Update (with authentication) ===
+    webConfigServer.on("/api/update", HTTP_POST, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        bool success = !Update.hasError();
+        webConfigServer.send(200, "application/json", 
+            success ? "{\"success\":true}" : "{\"success\":false}");
+        if (success) {
+            delay(500);
+            ESP.restart();
+        }
+    }, [prepare_for_ota]() {
+        // Auth check on upload start
+        if (!webConfigServer.authenticate(WEB_USER, WEB_PASS)) {
+            return;
+        }
+        HTTPUpload& upload = webConfigServer.upload();
+        if (upload.status == UPLOAD_FILE_START) {
+            Serial.printf("[OTA] Update: %s\n", upload.filename.c_str());
+            prepare_for_ota();
+            if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_WRITE) {
+            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_END) {
+            if (Update.end(true)) {
+                Serial.printf("[OTA] Success: %u bytes\n", upload.totalSize);
+            } else {
+                Update.printError(Serial);
+            }
+        }
+    });
+
+    // === GitHub OTA Check ===
+    webConfigServer.on("/api/update/check", HTTP_GET, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        
+        WiFiClientSecure client;
+        client.setInsecure(); // GitHub API requires HTTPS. Using insecure for simplicity/memory.
+        HTTPClient https;
+        
+        String url = String("https://api.github.com/repos/") + GITHUB_REPO_OWNER + "/" + GITHUB_REPO_NAME + "/releases/latest";
+        
+        if (https.begin(client, url)) {
+            int httpCode = https.GET();
+            if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+                String payload = https.getString();
+                
+                // Parse JSON to get tag_name and browser_download_url
+                DynamicJsonDocument doc(4096);
+                DeserializationError error = deserializeJson(doc, payload);
+                
+                if (!error) {
+                    String tagName = doc["tag_name"] | "";
+                    String downloadUrl = "";
+                    
+                    JsonArray assets = doc["assets"];
+                    for (JsonObject asset : assets) {
+                        String name = asset["name"] | "";
+                        if (name.endsWith(".bin")) {
+                            downloadUrl = asset["browser_download_url"] | "";
+                            break;
+                        }
+                    }
+                    
+                    String response = "{";
+                    response += "\"current_version\":\"" + String(FIRMWARE_VERSION) + "\",";
+                    response += "\"latest_version\":\"" + tagName + "\",";
+                    response += "\"download_url\":\"" + downloadUrl + "\"";
+                    response += "}";
+                    
+                    webConfigServer.send(200, "application/json", response);
+                } else {
+                    webConfigServer.send(500, "application/json", "{\"error\":\"Failed to parse GitHub response\"}");
+                }
+            } else {
+                webConfigServer.send(500, "application/json", "{\"error\":\"Failed to fetch from GitHub: " + String(httpCode) + "\"}");
+            }
+            https.end();
+        } else {
+            webConfigServer.send(500, "application/json", "{\"error\":\"Unable to connect to GitHub API\"}");
+        }
+    });
+
+    // === GitHub OTA Download & Install (Async) ===
+    webConfigServer.on("/api/update/github", HTTP_POST, [prepare_for_ota, otaGithubTask]() {
+        if (!isAuthenticated(webConfigServer)) return;
+        
+        if (ota_progress >= 0 && ota_progress < 100) {
+            webConfigServer.send(400, "application/json", "{\"error\":\"Update already in progress\"}");
+            return;
+        }
+
+        StaticJsonDocument<512> doc;
+        DeserializationError err = deserializeJson(doc, webConfigServer.arg("plain"));
+        
+        if (err || !doc.containsKey("url")) {
+            webConfigServer.send(400, "application/json", "{\"error\":\"Missing download URL\"}");
+            return;
+        }
+        
+        String url = doc["url"].as<String>();
+        
+        prepare_for_ota();
+        
+        // Allocate URL string on heap for the task
+        char *urlStr = (char *)malloc(url.length() + 1);
+        strcpy(urlStr, url.c_str());
+        
+        xTaskCreate(otaGithubTask, "otaTask", 8192, (void *)urlStr, 1, NULL);
+        
+        webConfigServer.send(200, "application/json", "{\"success\":true, \"message\":\"Downloading firmware in background\"}");
+    });
+
+    // === OTA Status Polling ===
+    webConfigServer.on("/api/update/status", HTTP_GET, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        
+        String response = "{";
+        response += "\"progress\":" + String(ota_progress) + ",";
+        response += "\"message\":\"" + ota_status_msg + "\"";
+        response += "}";
+        
+        webConfigServer.send(200, "application/json", response);
+    });
+
+
+    // === Integration Settings (MQTT + Telegram) ===
+    webConfigServer.on("/api/settings", HTTP_GET, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        StaticJsonDocument<1024> doc;
+        doc["btEnabled"] = appSettings.btEnabled;
+        doc["btStealth"] = appSettings.btStealthMode;
+        doc["btMac"]     = appSettings.btPresenceMac;
+        doc["btTimeout"] = appSettings.btPresenceTimeout;
+        doc["btGain"]    = appSettings.btMicGain;
+        doc["hwGain"]    = appSettings.hwMicGain;
+        doc["audioSrc"]  = (int)appSettings.audioSource;
+        
+        doc["mqttEnabled"] = appSettings.mqttEnabled;
+        doc["mqttBroker"] = appSettings.mqttBroker;
+        doc["mqttPort"] = appSettings.mqttPort;
+        doc["mqttUser"] = appSettings.mqttUser;
+        doc["mqttPass"] = appSettings.mqttPassword;
+        
+        doc["tgEnabled"] = appSettings.telegramEnabled;
+        doc["tgToken"] = appSettings.telegramBotToken;
+        doc["tgChatId"] = appSettings.telegramChatId;
+        
+        doc["gdEnabled"] = appSettings.googleDriveEnabled;
+        doc["gdMotion"] = appSettings.googleDriveMotion;
+        doc["gdUrl"] = appSettings.googleDriveScriptUrl;
+        
+        doc["webDav"] = appSettings.webDavEnabled;
+        doc["contRec"] = appSettings.continuousRecordingEnabled;
+        doc["contRecChunk"] = appSettings.continuousRecordingChunkSize;
+        doc["ntp"] = appSettings.ntpServer;
+        doc["tz"] = appSettings.timeZone;
+
+        String response;
+        serializeJson(doc, response);
+        webConfigServer.send(200, "application/json", response);
+    });
+
+    webConfigServer.on("/api/settings", HTTP_POST, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        StaticJsonDocument<1024> doc;
+        DeserializationError err = deserializeJson(doc, webConfigServer.arg("plain"));
+        if (err) {
+            webConfigServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+            return;
+        }
+
+        if(doc.containsKey("btEnabled")) appSettings.btEnabled = doc["btEnabled"];
+        if(doc.containsKey("btStealth")) appSettings.btStealthMode = doc["btStealth"];
+        if(doc.containsKey("btMac"))     strncpy(appSettings.btPresenceMac, doc["btMac"], sizeof(appSettings.btPresenceMac) - 1);
+        if(doc.containsKey("btTimeout")) appSettings.btPresenceTimeout = doc["btTimeout"];
+        if(doc.containsKey("btGain"))    appSettings.btMicGain = doc["btGain"];
+        if(doc.containsKey("hwGain"))    appSettings.hwMicGain = doc["hwGain"];
+        if(doc.containsKey("audioSrc"))  appSettings.audioSource = (AudioSource)doc["audioSrc"].as<int>();
+
+        if(doc.containsKey("mqttEnabled")) appSettings.mqttEnabled = doc["mqttEnabled"];
+        if(doc.containsKey("mqttBroker")) strncpy(appSettings.mqttBroker, doc["mqttBroker"], sizeof(appSettings.mqttBroker) - 1);
+        if(doc.containsKey("mqttPort")) appSettings.mqttPort = doc["mqttPort"];
+        if(doc.containsKey("mqttUser")) strncpy(appSettings.mqttUser, doc["mqttUser"], sizeof(appSettings.mqttUser) - 1);
+        if(doc.containsKey("mqttPass")) strncpy(appSettings.mqttPassword, doc["mqttPass"], sizeof(appSettings.mqttPassword) - 1);
+
+        if(doc.containsKey("tgEnabled")) appSettings.telegramEnabled = doc["tgEnabled"];
+        if(doc.containsKey("tgToken")) strncpy(appSettings.telegramBotToken, doc["tgToken"], sizeof(appSettings.telegramBotToken) - 1);
+        if(doc.containsKey("tgChatId")) strncpy(appSettings.telegramChatId, doc["tgChatId"], sizeof(appSettings.telegramChatId) - 1);
+
+        if(doc.containsKey("gdEnabled")) appSettings.googleDriveEnabled = doc["gdEnabled"];
+        if(doc.containsKey("gdMotion")) appSettings.googleDriveMotion = doc["gdMotion"];
+        if(doc.containsKey("gdUrl")) strncpy(appSettings.googleDriveScriptUrl, doc["gdUrl"], sizeof(appSettings.googleDriveScriptUrl) - 1);
+
+        if(doc.containsKey("webDav")) appSettings.webDavEnabled = doc["webDav"];
+        if(doc.containsKey("contRec")) appSettings.continuousRecordingEnabled = doc["contRec"];
+        if(doc.containsKey("contRecChunk")) appSettings.continuousRecordingChunkSize = doc["contRecChunk"];
+        if(doc.containsKey("ntp")) strncpy(appSettings.ntpServer, doc["ntp"], sizeof(appSettings.ntpServer) - 1);
+        if(doc.containsKey("tz")) strncpy(appSettings.timeZone, doc["tz"], sizeof(appSettings.timeZone) - 1);
+
+        saveSettings();
+        webConfigServer.send(200, "application/json", "{\"success\":true,\"message\":\"Settings Saved\"}");
+    });
+
+    // --- WebDAV Integration ---
+    const char * headerkeys[] = {"Depth"};
+    size_t headerkeyssize = sizeof(headerkeys) / sizeof(char*);
+    webConfigServer.collectHeaders(headerkeys, headerkeyssize);
+    webdav_server_init(&webConfigServer);
+
     webConfigServer.begin();
         Serial.println("[INFO] Web config server started.");
     }
 
     void web_config_loop() {
         webConfigServer.handleClient();
+        
+        // Track heap low-water mark for fragmentation monitoring
+        uint32_t freeHeap = ESP.getFreeHeap();
+        if (freeHeap < s_minFreeHeap) {
+            s_minFreeHeap = freeHeap;
+        }
     }

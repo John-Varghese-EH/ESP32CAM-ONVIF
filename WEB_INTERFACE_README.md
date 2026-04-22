@@ -190,9 +190,12 @@ A **feature-rich, modern web interface** for controlling and monitoring your ESP
 - File size & date info
 
 ### 6. **System** ⚙️
-- Firmware update (OTA)
-- SD card information
-- Settings export/import
+- Firmware update (OTA via Manual Upload or GitHub Releases)
+- SD card information & WebDAV access
+- Settings export/import (JSON)
+- Advanced Integrations (MQTT, Telegram)
+- Google Drive Backup (supports bundling browser localStorage UI state)
+- Live Resource Monitor (Heap/PSRAM real-time graphing)
 - Sync time
 - Reboot device
 
@@ -236,6 +239,8 @@ A **feature-rich, modern web interface** for controlling and monitoring your ESP
 | `esp32cam_history` | Connection timeline (24h) | ~850KB |
 | `esp32cam_filters` | Video filter settings | <1KB |
 | `esp32cam_preferences` | Sound settings | <1KB |
+| `esp32cam_gd_backup_settings` | GDrive: Upload ESP32 Settings config | <10 bytes |
+| `esp32cam_gd_backup_local` | GDrive: Upload Browser LocalStorage | <10 bytes |
 | **Total** | | **<7MB** |
 
 ### Automatic Cleanup

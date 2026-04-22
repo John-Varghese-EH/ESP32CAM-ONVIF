@@ -3,12 +3,18 @@
 #include <time.h>
 #include "esp_camera.h"
 
-CRtspSession::CRtspSession(SOCKET aRtspClient, CStreamer * aStreamer) : m_RtspClient(aRtspClient),m_Streamer(aStreamer)
+// Shared RTSP response buffers — single-threaded, no concurrency risk.
+static char s_RtspResponse[1024];
+static char s_RtspSDP[1024];
+static char s_RtspURL[256];
+
+CRtspSession::CRtspSession(SOCKET aRtspClient, CStreamer * aStreamer)
+    : m_RtspClient(aRtspClient), m_Streamer(aStreamer)
 {
     printf("Creating RTSP session\n");
     Init();
 
-    m_RtspSessionID  = getRandom();         // create a session ID
+    m_RtspSessionID  = getRandom();
     m_RtspSessionID |= 0x80000000;
     m_StreamID       = -1;
     m_ClientRTPPort  =  0;
@@ -16,17 +22,14 @@ CRtspSession::CRtspSession(SOCKET aRtspClient, CStreamer * aStreamer) : m_RtspCl
     m_TcpTransport   =  false;
     m_streaming = false;
     m_stopped = false;
-    m_ClientPtr = nullptr;  // Will be set externally if needed
 };
 
 CRtspSession::~CRtspSession()
 {
+    // closesocket() handles both stop() and delete of the WiFiClient.
+    // SOCKET is typedef'd to WiFiClient* (see platglue-esp32.h).
     closesocket(m_RtspClient);
-    // Memory leak fix: Delete the WiFiClient if we own it
-    if (m_ClientPtr) {
-        delete m_ClientPtr;
-        m_ClientPtr = nullptr;
-    }
+    m_RtspClient = nullptr;
 };
 
 void CRtspSession::Init()
@@ -41,45 +44,36 @@ void CRtspSession::Init()
 
 bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize)
 {
-    char CmdName[RTSP_PARAM_STRING_MAX];
-    static char CurRequest[RTSP_BUFFER_SIZE]; // Note: we assume single threaded, this large buf we keep off of the tiny stack
-    unsigned CurRequestSize;
+    // NOTE: We parse directly from aRequest (which is the RecvBuf in handleRequests).
+    // Previously a separate static CurRequest[RTSP_BUFFER_SIZE] was used as a copy,
+    // wasting 2KB of BSS. Eliminated by making the receive buffer mutable.
+    char * CurRequest = (char *)aRequest;  // Cast away const — we own this buffer
+    unsigned CurRequestSize = aRequestSize;
 
     Init();
-    CurRequestSize = aRequestSize;
-    memcpy(CurRequest,aRequest,aRequestSize);
 
-    // check whether the request contains information about the RTP/RTCP UDP client ports (SETUP command)
-    char * ClientPortPtr;
-    char * TmpPtr;
-    static char CP[1024];
-    char * pCP;
-
-    ClientPortPtr = strstr(CurRequest,"client_port");
+    // Extract client_port from SETUP request
+    char * ClientPortPtr = strstr(CurRequest, "client_port");
     if (ClientPortPtr != nullptr)
     {
-        TmpPtr = strstr(ClientPortPtr,"\r\n");
+        char * TmpPtr = strstr(ClientPortPtr, "\r\n");
         if (TmpPtr != nullptr)
         {
-            TmpPtr[0] = 0x00;
-            strcpy(CP,ClientPortPtr);
-            pCP = strstr(CP,"=");
-            if (pCP != nullptr)
+            char saved = TmpPtr[0];
+            TmpPtr[0] = '\0';
+            char * pEq = strstr(ClientPortPtr, "=");
+            if (pEq != nullptr)
             {
-                pCP++;
-                strcpy(CP,pCP);
-                pCP = strstr(CP,"-");
-                if (pCP != nullptr)
-                {
-                    pCP[0] = 0x00;
-                    m_ClientRTPPort  = atoi(CP);
-                    m_ClientRTCPPort = m_ClientRTPPort + 1;
-                };
-            };
-        };
-    };
+                pEq++;
+                m_ClientRTPPort = atoi(pEq);
+                m_ClientRTCPPort = m_ClientRTPPort + 1;
+            }
+            TmpPtr[0] = saved;  // Restore for further parsing
+        }
+    }
 
-    // Read everything up to the first space as the command name
+    // Read command name (up to first space)
+    char CmdName[RTSP_PARAM_STRING_MAX];
     bool parseSucceeded = false;
     unsigned i;
     for (i = 0; i < sizeof(CmdName)-1 && i < CurRequestSize; ++i)
@@ -93,34 +87,30 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
         CmdName[i] = c;
     }
     CmdName[i] = '\0';
-    if (!parseSucceeded) {
-        printf("failed to parse RTSP\n");
-        return false;
-    }
+    if (!parseSucceeded) return false;
 
     printf("RTSP received %s\n", CmdName);
 
-    // find out the command type
-    if (strstr(CmdName,"OPTIONS")   != nullptr) m_RtspCmdType = RTSP_OPTIONS; else
-    if (strstr(CmdName,"DESCRIBE")  != nullptr) m_RtspCmdType = RTSP_DESCRIBE; else
-    if (strstr(CmdName,"SETUP")     != nullptr) m_RtspCmdType = RTSP_SETUP; else
-    if (strstr(CmdName,"PLAY")      != nullptr) m_RtspCmdType = RTSP_PLAY; else
-    if (strstr(CmdName,"TEARDOWN")  != nullptr) m_RtspCmdType = RTSP_TEARDOWN; else
-    if (strstr(CmdName,"GET_PARAMETER") != nullptr) m_RtspCmdType = RTSP_GET_PARAMETER;
+    // Identify command type — use strcmp for exact match (faster, no false substring hits)
+    if      (strcmp(CmdName, "OPTIONS") == 0)       m_RtspCmdType = RTSP_OPTIONS;
+    else if (strcmp(CmdName, "DESCRIBE") == 0)      m_RtspCmdType = RTSP_DESCRIBE;
+    else if (strcmp(CmdName, "SETUP") == 0)         m_RtspCmdType = RTSP_SETUP;
+    else if (strcmp(CmdName, "PLAY") == 0)          m_RtspCmdType = RTSP_PLAY;
+    else if (strcmp(CmdName, "TEARDOWN") == 0)      m_RtspCmdType = RTSP_TEARDOWN;
+    else if (strcmp(CmdName, "GET_PARAMETER") == 0) m_RtspCmdType = RTSP_GET_PARAMETER;
 
-    // check whether the request contains transport information (UDP or TCP)
+    // Check transport type for SETUP
     if (m_RtspCmdType == RTSP_SETUP)
     {
-        TmpPtr = strstr(CurRequest,"RTP/AVP/TCP");
-        if (TmpPtr != nullptr) m_TcpTransport = true; else m_TcpTransport = false;
-    };
+        m_TcpTransport = (strstr(CurRequest, "RTP/AVP/TCP") != nullptr);
+    }
 
-    // Skip over the prefix of any "rtsp://" or "rtsp:/" URL that follows:
+    // Skip over the "rtsp://" URL prefix
     unsigned j = i+1;
-    while (j < CurRequestSize && (CurRequest[j] == ' ' || CurRequest[j] == '\t')) ++j; // skip over any additional white space
+    while (j < CurRequestSize && (CurRequest[j] == ' ' || CurRequest[j] == '\t')) ++j;
     for (; (int)j < (int)(CurRequestSize-8); ++j)
     {
-        if ((CurRequest[j]   == 'r' || CurRequest[j]   == 'R')   &&
+        if ((CurRequest[j]   == 'r' || CurRequest[j]   == 'R') &&
             (CurRequest[j+1] == 't' || CurRequest[j+1] == 'T') &&
             (CurRequest[j+2] == 's' || CurRequest[j+2] == 'S') &&
             (CurRequest[j+3] == 'p' || CurRequest[j+3] == 'P') &&
@@ -128,15 +118,13 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
         {
             j += 6;
             if (CurRequest[j] == '/')
-            {   // This is a "rtsp://" URL; skip over the host:port part that follows:
+            {
                 ++j;
                 unsigned uidx = 0;
                 while (j < CurRequestSize && CurRequest[j] != '/' && CurRequest[j] != ' ' && uidx < sizeof(m_URLHostPort) - 1)
-                {   // extract the host:port part of the URL here
-                    m_URLHostPort[uidx] = CurRequest[j];
-                    uidx++;
-                    ++j;
-                };
+                {
+                    m_URLHostPort[uidx++] = CurRequest[j++];
+                }
             }
             else --j;
             i = j;
@@ -144,12 +132,12 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
         }
     }
 
-    // Look for the URL suffix (before the following "RTSP/"):
+    // Extract URL suffix (before "RTSP/")
     parseSucceeded = false;
     for (unsigned k = i+1; (int)k < (int)(CurRequestSize-5); ++k)
     {
-        if (CurRequest[k]   == 'R'   && CurRequest[k+1] == 'T'   &&
-            CurRequest[k+2] == 'S'   && CurRequest[k+3] == 'P'   &&
+        if (CurRequest[k]   == 'R' && CurRequest[k+1] == 'T' &&
+            CurRequest[k+2] == 'S' && CurRequest[k+3] == 'P' &&
             CurRequest[k+4] == '/')
         {
             while (--k >= i && CurRequest[k] == ' ') {}
@@ -157,7 +145,6 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
             while (k1 > i && CurRequest[k1] != '/') --k1;
             if (k - k1 + 1 > sizeof(m_URLSuffix)) return false;
             unsigned n = 0, k2 = k1+1;
-
             while (k2 <= k) m_URLSuffix[n++] = CurRequest[k2++];
             m_URLSuffix[n] = '\0';
 
@@ -172,7 +159,7 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
     }
     if (!parseSucceeded) return false;
 
-    // Look for "CSeq:", skip whitespace, then read everything up to the next \r or \n as 'CSeq':
+    // Extract CSeq header
     parseSucceeded = false;
     for (j = i; (int)j < (int)(CurRequestSize-5); ++j)
     {
@@ -181,9 +168,9 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
             CurRequest[j+4] == ':')
         {
             j += 5;
-            while (j < CurRequestSize && (CurRequest[j] ==  ' ' || CurRequest[j] == '\t')) ++j;
+            while (j < CurRequestSize && (CurRequest[j] == ' ' || CurRequest[j] == '\t')) ++j;
             unsigned n;
-            for (n = 0; n < sizeof(m_CSeq)-1 && j < CurRequestSize; ++n,++j)
+            for (n = 0; n < sizeof(m_CSeq)-1 && j < CurRequestSize; ++n, ++j)
             {
                 char c = CurRequest[j];
                 if (c == '\r' || c == '\n')
@@ -199,7 +186,7 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
     }
     if (!parseSucceeded) return false;
 
-    // Also: Look for "Content-Length:" (optional)
+    // Extract Content-Length (optional)
     for (j = i; (int)j < (int)(CurRequestSize-15); ++j)
     {
         if (CurRequest[j]    == 'C'  && CurRequest[j+1]  == 'o'  &&
@@ -207,12 +194,12 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
             CurRequest[j+4]  == 'e'  && CurRequest[j+5]  == 'n'  &&
             CurRequest[j+6]  == 't'  && CurRequest[j+7]  == '-'  &&
             (CurRequest[j+8] == 'L' || CurRequest[j+8]   == 'l') &&
-            CurRequest[j+9]  == 'e'  && CurRequest[j+10] == 'n' &&
-            CurRequest[j+11] == 'g' && CurRequest[j+12]  == 't' &&
-            CurRequest[j+13] == 'h' && CurRequest[j+14] == ':')
+            CurRequest[j+9]  == 'e'  && CurRequest[j+10] == 'n'  &&
+            CurRequest[j+11] == 'g'  && CurRequest[j+12] == 't'  &&
+            CurRequest[j+13] == 'h'  && CurRequest[j+14] == ':')
         {
             j += 15;
-            while (j < CurRequestSize && (CurRequest[j] ==  ' ' || CurRequest[j] == '\t')) ++j;
+            while (j < CurRequestSize && (CurRequest[j] == ' ' || CurRequest[j] == '\t')) ++j;
             unsigned num;
             if (sscanf(&CurRequest[j], "%u", &num) == 1) m_ContentLength = num;
         }
@@ -222,86 +209,64 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
 
 RTSP_CMD_TYPES CRtspSession::Handle_RtspRequest(char const * aRequest, unsigned aRequestSize)
 {
-    if (ParseRtspRequest(aRequest,aRequestSize))
+    if (ParseRtspRequest(aRequest, aRequestSize))
     {
         switch (m_RtspCmdType)
         {
-        case RTSP_OPTIONS:  { Handle_RtspOPTION();   break; };
-        case RTSP_DESCRIBE: { Handle_RtspDESCRIBE(); break; };
-        case RTSP_SETUP:    { Handle_RtspSETUP();    break; };
-        case RTSP_PLAY:     { Handle_RtspPLAY();     break; };
-        case RTSP_GET_PARAMETER: { Handle_RtspGET_PARAMETER(); break; };
-        default: {};
-        };
-    };
+        case RTSP_OPTIONS:       Handle_RtspOPTION();        break;
+        case RTSP_DESCRIBE:      Handle_RtspDESCRIBE();      break;
+        case RTSP_SETUP:         Handle_RtspSETUP();         break;
+        case RTSP_PLAY:          Handle_RtspPLAY();          break;
+        case RTSP_GET_PARAMETER: Handle_RtspGET_PARAMETER(); break;
+        default: break;
+        }
+    }
     return m_RtspCmdType;
 };
 
 void CRtspSession::Handle_RtspOPTION()
 {
-    static char Response[1024]; // Note: we assume single threaded, this large buf we keep off of the tiny stack
-
-    snprintf(Response,sizeof(Response),
+    snprintf(s_RtspResponse, sizeof(s_RtspResponse),
              "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
-             "Public: DESCRIBE, SETUP, TEARDOWN, PLAY, GET_PARAMETER\r\n\r\n",m_CSeq);
-
-    socketsend(m_RtspClient,Response,strlen(Response));
+             "Public: DESCRIBE, SETUP, TEARDOWN, PLAY, GET_PARAMETER\r\n\r\n", m_CSeq);
+    socketsend(m_RtspClient, s_RtspResponse, strlen(s_RtspResponse));
 }
 
 void CRtspSession::Handle_RtspDESCRIBE()
 {
-    static char Response[1024]; // Note: we assume single threaded, this large buf we keep off of the tiny stack
-    static char SDPBuf[1024];
-    static char URLBuf[1024];
+    m_StreamID = -1;
 
-    // check whether we know a stream with the URL which is requested
-    m_StreamID = -1;        // invalid URL
-    
-    // Support both MJPEG and H.264 stream paths
-    if ((strcmp(m_URLPreSuffix,"mjpeg") == 0) && (strcmp(m_URLSuffix,"1") == 0)) m_StreamID = 0;
-    else if ((strcmp(m_URLPreSuffix,"mjpeg") == 0) && (strcmp(m_URLSuffix,"2") == 0)) m_StreamID = 1;
-    else if ((strcmp(m_URLPreSuffix,"h264") == 0) && (strcmp(m_URLSuffix,"1") == 0)) m_StreamID = 2;
-    else if ((strcmp(m_URLPreSuffix,"h264") == 0) && (strcmp(m_URLSuffix,"2") == 0)) m_StreamID = 3;
-    // Also accept just /1 or /2 with no prefix
-    else if (strlen(m_URLPreSuffix) == 0 && strcmp(m_URLSuffix,"1") == 0) m_StreamID = 0;
-    else if (strlen(m_URLPreSuffix) == 0 && strcmp(m_URLSuffix,"2") == 0) m_StreamID = 1;
-    
+    // Route stream paths
+    if      (strcmp(m_URLPreSuffix, "mjpeg") == 0 && strcmp(m_URLSuffix, "1") == 0) m_StreamID = 0;
+    else if (strcmp(m_URLPreSuffix, "mjpeg") == 0 && strcmp(m_URLSuffix, "2") == 0) m_StreamID = 1;
+    else if (strcmp(m_URLPreSuffix, "h264")  == 0 && strcmp(m_URLSuffix, "1") == 0) m_StreamID = 2;
+    else if (strcmp(m_URLPreSuffix, "h264")  == 0 && strcmp(m_URLSuffix, "2") == 0) m_StreamID = 3;
+    else if (strlen(m_URLPreSuffix) == 0 && strcmp(m_URLSuffix, "1") == 0) m_StreamID = 0;
+    else if (strlen(m_URLPreSuffix) == 0 && strcmp(m_URLSuffix, "2") == 0) m_StreamID = 1;
+
     if (m_StreamID == -1)
-    {   // Stream not available
-        snprintf(Response,sizeof(Response),
+    {
+        snprintf(s_RtspResponse, sizeof(s_RtspResponse),
                  "RTSP/1.0 404 Stream Not Found\r\nCSeq: %s\r\n%s\r\n",
-                 m_CSeq,
-                 DateHeader());
-
-        socketsend(m_RtspClient,Response,strlen(Response));
+                 m_CSeq, DateHeader());
+        socketsend(m_RtspClient, s_RtspResponse, strlen(s_RtspResponse));
         return;
-    };
-
-    // simulate DESCRIBE server response
-    static char OBuf[256];
-    char * ColonPtr;
-    strcpy(OBuf,m_URLHostPort);
-    ColonPtr = strstr(OBuf,":"); 
-    if (ColonPtr != nullptr) ColonPtr[0] = 0x00;
-
-    // Get actual resolution from camera
-    sensor_t * s = esp_camera_sensor_get();
-    int width = 640, height = 480;
-    if (s) {
-        width = 640;  // Default VGA
-        height = 480;
     }
-    
-    // Determine codec based on stream ID (0-1 = MJPEG, 2-3 = H.264)
+
+    // Extract host IP from URL (strip port)
+    static char OBuf[256];
+    strcpy(OBuf, m_URLHostPort);
+    char * ColonPtr = strstr(OBuf, ":");
+    if (ColonPtr != nullptr) ColonPtr[0] = '\0';
+
+    // Determine codec
     bool useH264 = (m_StreamID >= 2);
-    
+
     if (useH264) {
-        // H.264 SDP (RTP payload type 96 - dynamic)
-        snprintf(SDPBuf,sizeof(SDPBuf),
+        snprintf(s_RtspSDP, sizeof(s_RtspSDP),
                  "v=0\r\n"
                  "o=- %d 1 IN IP4 %s\r\n"
                  "s=ESP32-CAM H.264 Stream\r\n"
-                 "i=ESP32 H.264 Video Stream\r\n"
                  "t=0 0\r\n"
                  "a=tool:ESP32-CAM RTSP Server\r\n"
                  "a=type:broadcast\r\n"
@@ -314,15 +279,12 @@ void CRtspSession::Handle_RtspDESCRIBE()
                  "a=fmtp:96 packetization-mode=1;profile-level-id=42E01F\r\n"
                  "a=framerate:25\r\n"
                  "a=control:track1\r\n",
-                 rand(),
-                 OBuf);
+                 rand(), OBuf);
     } else {
-        // MJPEG SDP (RTP payload type 26)
-        snprintf(SDPBuf,sizeof(SDPBuf),
+        snprintf(s_RtspSDP, sizeof(s_RtspSDP),
                  "v=0\r\n"
                  "o=- %d 1 IN IP4 %s\r\n"
                  "s=ESP32-CAM RTSP Stream\r\n"
-                 "i=ESP32-CAM MJPEG Stream\r\n"
                  "t=0 0\r\n"
                  "a=tool:ESP32-CAM RTSP Server\r\n"
                  "a=type:broadcast\r\n"
@@ -332,103 +294,80 @@ void CRtspSession::Handle_RtspDESCRIBE()
                  "c=IN IP4 0.0.0.0\r\n"
                  "b=AS:4096\r\n"
                  "a=rtpmap:26 JPEG/90000\r\n"
-                 "a=fmtp:26 width=%d;height=%d;quality=10\r\n"
+                 "a=fmtp:26 width=640;height=480;quality=10\r\n"
                  "a=framerate:20\r\n"
                  "a=control:track1\r\n",
-                 rand(),
-                 OBuf,
-                 width,
-                 height);
+                 rand(), OBuf);
     }
-    
-    char StreamName[64];
-    switch (m_StreamID)
-    {
-    case 0: strcpy(StreamName,"mjpeg/1"); break;
-    case 1: strcpy(StreamName,"mjpeg/2"); break;
-    case 2: strcpy(StreamName,"h264/1"); break;
-    case 3: strcpy(StreamName,"h264/2"); break;
-    default: strcpy(StreamName,"1"); break;
-    };
-    snprintf(URLBuf,sizeof(URLBuf),
-             "rtsp://%s/%s",
-             m_URLHostPort,
-             StreamName);
-    snprintf(Response,sizeof(Response),
+
+    // Build stream name for Content-Base
+    char StreamName[16];
+    switch (m_StreamID) {
+    case 0: strcpy(StreamName, "mjpeg/1"); break;
+    case 1: strcpy(StreamName, "mjpeg/2"); break;
+    case 2: strcpy(StreamName, "h264/1");  break;
+    case 3: strcpy(StreamName, "h264/2");  break;
+    default: strcpy(StreamName, "1");      break;
+    }
+    snprintf(s_RtspURL, sizeof(s_RtspURL), "rtsp://%s/%s", m_URLHostPort, StreamName);
+    snprintf(s_RtspResponse, sizeof(s_RtspResponse),
              "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
              "%s\r\n"
              "Content-Base: %s/\r\n"
              "Content-Type: application/sdp\r\n"
              "Content-Length: %d\r\n\r\n"
              "%s",
-             m_CSeq,
-             DateHeader(),
-             URLBuf,
-             (int) strlen(SDPBuf),
-             SDPBuf);
-
-    socketsend(m_RtspClient,Response,strlen(Response));
+             m_CSeq, DateHeader(), s_RtspURL, (int)strlen(s_RtspSDP), s_RtspSDP);
+    socketsend(m_RtspClient, s_RtspResponse, strlen(s_RtspResponse));
 }
 
 void CRtspSession::Handle_RtspSETUP()
 {
-    static char Response[1024];
-    static char Transport[255];
-
-    // init RTP streamer transport type (UDP or TCP) and ports for UDP transport
-    if (m_Streamer) {
-        m_Streamer->InitTransport(m_ClientRTPPort,m_ClientRTCPPort,m_TcpTransport);
-    } else {
-        printf("Error: m_Streamer is null in SETUP\n");
+    if (!m_Streamer) {
+        printf("[ERROR] m_Streamer is null in SETUP\n");
         return;
     }
 
-    // simulate SETUP server response
+    m_Streamer->InitTransport(m_ClientRTPPort, m_ClientRTCPPort, m_TcpTransport);
+
+    static char Transport[255];
     if (m_TcpTransport)
-        snprintf(Transport,sizeof(Transport),"RTP/AVP/TCP;unicast;interleaved=0-1");
+        snprintf(Transport, sizeof(Transport), "RTP/AVP/TCP;unicast;interleaved=0-1");
     else
-        snprintf(Transport,sizeof(Transport),
+        snprintf(Transport, sizeof(Transport),
                  "RTP/AVP;unicast;destination=127.0.0.1;source=127.0.0.1;client_port=%i-%i;server_port=%i-%i",
-                 m_ClientRTPPort,
-                 m_ClientRTCPPort,
-                 m_Streamer ? m_Streamer->GetRtpServerPort() : 0,
-                 m_Streamer ? m_Streamer->GetRtcpServerPort() : 0);
-    snprintf(Response,sizeof(Response),
+                 m_ClientRTPPort, m_ClientRTCPPort,
+                 m_Streamer->GetRtpServerPort(),
+                 m_Streamer->GetRtcpServerPort());
+
+    snprintf(s_RtspResponse, sizeof(s_RtspResponse),
              "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
              "%s\r\n"
              "Transport: %s\r\n"
              "Session: %i;timeout=60\r\n\r\n",
-             m_CSeq,
-             DateHeader(),
-             Transport,
-             m_RtspSessionID);
-
-    socketsend(m_RtspClient,Response,strlen(Response));
+             m_CSeq, DateHeader(), Transport, m_RtspSessionID);
+    socketsend(m_RtspClient, s_RtspResponse, strlen(s_RtspResponse));
 }
 
 void CRtspSession::Handle_RtspPLAY()
 {
-    static char Response[1024];
+    char StreamPath[16];
+    switch (m_StreamID) {
+    case 0: strcpy(StreamPath, "mjpeg/1"); break;
+    case 1: strcpy(StreamPath, "mjpeg/2"); break;
+    case 2: strcpy(StreamPath, "h264/1");  break;
+    case 3: strcpy(StreamPath, "h264/2");  break;
+    default: strcpy(StreamPath, "mjpeg/1"); break;
+    }
 
-    // Get IP for dynamic URL construction
-    IPADDRESS clientip;
-    IPPORT clientport;
-    socketpeeraddr(m_RtspClient, &clientip, &clientport);
-    
-    // Hikvision-compatible PLAY response with proper timeout and RTP-Info
-    snprintf(Response,sizeof(Response),
+    snprintf(s_RtspResponse, sizeof(s_RtspResponse),
              "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
              "%s\r\n"
              "Range: npt=0.000-\r\n"
              "Session: %i;timeout=60\r\n"
-             "RTP-Info: url=rtsp://%s:%d/mjpeg/1/track1;seq=0;rtptime=0\r\n\r\n",
-             m_CSeq,
-             DateHeader(),
-             m_RtspSessionID,
-             m_URLHostPort,
-             554);
-
-    socketsend(m_RtspClient,Response,strlen(Response));
+             "RTP-Info: url=rtsp://%s/%s/track1;seq=0;rtptime=0\r\n\r\n",
+             m_CSeq, DateHeader(), m_RtspSessionID, m_URLHostPort, StreamPath);
+    socketsend(m_RtspClient, s_RtspResponse, strlen(s_RtspResponse));
 }
 
 char const * CRtspSession::DateHeader()
@@ -446,37 +385,30 @@ int CRtspSession::GetStreamID()
 
 void CRtspSession::Handle_RtspGET_PARAMETER()
 {
-    static char Response[1024];
-
-    // GET_PARAMETER response used for Keep-Alive/Heartbeat
-    snprintf(Response,sizeof(Response),
+    snprintf(s_RtspResponse, sizeof(s_RtspResponse),
              "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
              "Session: %i\r\n\r\n",
-             m_CSeq,
-             m_RtspSessionID);
-
-    socketsend(m_RtspClient,Response,strlen(Response));
+             m_CSeq, m_RtspSessionID);
+    socketsend(m_RtspClient, s_RtspResponse, strlen(s_RtspResponse));
 }
 
-
-
-/**
-   Read from our socket, parsing commands as possible.
- */
 bool CRtspSession::handleRequests(uint32_t readTimeoutMs)
 {
-    if(m_stopped)
-        return false; // Already closed down
+    if (m_stopped)
+        return false;
 
-    static char RecvBuf[RTSP_BUFFER_SIZE];   // Note: we assume single threaded, this large buf we keep off of the tiny stack
+    // Single receive buffer — ParseRtspRequest now operates on this directly
+    // (no more redundant memcpy to a separate CurRequest buffer)
+    static char RecvBuf[RTSP_BUFFER_SIZE];
 
-    memset(RecvBuf,0x00,sizeof(RecvBuf));
-    int res = socketread(m_RtspClient,RecvBuf,sizeof(RecvBuf), readTimeoutMs);
-    if(res > 0) {
-        // we filter away everything which seems not to be an RTSP command: O-ption, D-escribe, S-etup, P-lay, T-eardown
-        if ((RecvBuf[0] == 'O') || (RecvBuf[0] == 'D') || (RecvBuf[0] == 'S') || (RecvBuf[0] == 'P') || (RecvBuf[0] == 'T'))
+    memset(RecvBuf, 0x00, sizeof(RecvBuf));
+    int res = socketread(m_RtspClient, RecvBuf, sizeof(RecvBuf), readTimeoutMs);
+    if (res > 0) {
+        // Filter: valid RTSP commands start with O, D, S, P, T, or G
+        char first = RecvBuf[0];
+        if (first == 'O' || first == 'D' || first == 'S' || first == 'P' || first == 'T' || first == 'G')
         {
-            RTSP_CMD_TYPES C = Handle_RtspRequest(RecvBuf,res);
+            RTSP_CMD_TYPES C = Handle_RtspRequest(RecvBuf, res);
             if (C == RTSP_PLAY)
                 m_streaming = true;
             else if (C == RTSP_TEARDOWN)
@@ -484,25 +416,18 @@ bool CRtspSession::handleRequests(uint32_t readTimeoutMs)
         }
         return true;
     }
-    else if(res == 0) {
-        printf("client closed socket, exiting\n");
+    else if (res == 0) {
         m_stopped = true;
         return true;
     }
-    else  {
-        // Timeout on read
-
+    else {
+        // Timeout
         return false;
     }
 }
 
 void CRtspSession::broadcastCurrentFrame(uint32_t curMsec) {
-    // Send a frame - CRASH PROOFING
-    if (m_streaming && !m_stopped) {
-        if(m_Streamer) {
-             m_Streamer->streamImage(curMsec);
-        } else {
-             printf("Error: m_Streamer is null\n");
-        }
+    if (m_streaming && !m_stopped && m_Streamer) {
+        m_Streamer->streamImage(curMsec);
     }
 }

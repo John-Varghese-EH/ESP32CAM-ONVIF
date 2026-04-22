@@ -177,15 +177,24 @@ def escape_raw_literal(content: str) -> str:
 
 
 def generate_header(html: str) -> str:
-    """Generate the C++ header file content."""
+    """Generate the C++ header file content using gzip compression."""
+    import gzip
+    
+    # Compress the HTML string
+    compressed = gzip.compress(html.encode('utf-8'))
+    
+    # Format as C++ hex array
+    hex_array = ', '.join([f'0x{b:02x}' for b in compressed])
+    
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return f'''#pragma once
 
 // ESP32-CAM ONVIF Web Interface - Auto-generated
-// Built: {ts} | Size: {len(html):,} bytes
+// Built: {ts} | Original: {len(html):,} bytes | GZipped: {len(compressed):,} bytes
 // Edit files in ESP32CAM-ONVIF/data/ then run: python utils/build_web.py
 
-const char index_html[] PROGMEM = R"rawliteral({html})rawliteral";
+const uint8_t index_html_gz[] PROGMEM = {{ {hex_array} }};
+const size_t index_html_gz_len = {len(compressed)};
 '''
 
 
@@ -238,16 +247,17 @@ def main():
     with open(out, 'w', encoding='utf-8') as f:
         f.write(header)
     
-    final = len(header)
-    saved = orig - final
-    pct = (saved / orig * 100) if orig > 0 else 0
+    import gzip
+    minified_size = len(html.encode('utf-8'))
+    gz_size = len(gzip.compress(html.encode('utf-8')))
     
     print(f"\n{'='*50}")
-    print(f"  Original: {orig:,} bytes")
-    print(f"  Final:    {final:,} bytes")
-    print(f"  Saved:    {saved:,} bytes ({pct:.1f}%)")
+    print(f"  Original:  {orig:,} bytes")
+    print(f"  Minified:  {minified_size:,} bytes")
+    print(f"  GZipped:   {gz_size:,} bytes")
+    print(f"  Saved:     {orig - gz_size:,} bytes ({(orig - gz_size) / orig * 100:.1f}%)")
     print(f"{'='*50}")
-    print("\n[✓] Done!\n")
+    print("\n[OK] Done!\n")
 
 
 if __name__ == "__main__":

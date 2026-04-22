@@ -3,6 +3,16 @@
 #include <SPIFFS.h>
 #include "config.h"
 #include "status_led.h"
+#include "onvif_server.h"
+#include <esp_wifi.h> // For esp_wifi_set_ps
+
+// RTC Data for Fast Reconnect
+RTC_DATA_ATTR uint8_t  rtc_bssid[6];
+RTC_DATA_ATTR uint8_t  rtc_channel;
+RTC_DATA_ATTR uint32_t rtc_ip;
+RTC_DATA_ATTR uint32_t rtc_gw;
+RTC_DATA_ATTR uint32_t rtc_mask;
+RTC_DATA_ATTR bool     rtc_valid = false;
 
 // Global instance
 WiFiManager wifiManager;
@@ -17,9 +27,23 @@ void WiFiManager::loop() {
     if (checkConnectivity()) {
         status_led_connected();
         _lastConnectedTime = millis(); // Refresh timestamp
+        
+        // Handle post-reconnect state
+        static bool _wasConnected = true;
+        if (!_wasConnected) {
+            _wasConnected = true;
+            Serial.println("[INFO] Re-broadcasting ONVIF WS-Discovery...");
+            onvif_reconnect(); 
+        }
     } else {
         status_led_error();
         
+        // Track disconnection
+        static bool _wasConnected = true;
+        if (_wasConnected) {
+            _wasConnected = false;
+        }
+
         unsigned long now = millis();
         
         // 1. Aggressive Reconnect Attempt
@@ -37,7 +61,7 @@ void WiFiManager::loop() {
         if (now - _lastConnectedTime > _wifiTimeoutMs) {
             Serial.printf("[FATAL] No WiFi for %lu ms. Rebooting for stability...\n", _wifiTimeoutMs);
             delay(1000);
-            ESP.restart();
+            esp_restart();
         }
     }
 }
@@ -47,6 +71,14 @@ bool WiFiManager::checkConnectivity() {
 }
 
 bool WiFiManager::begin() {
+  // Register WiFi Event Handler for immediate reconnect
+  WiFi.onEvent([](WiFiEvent_t event) {
+      if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+          Serial.println("[WARN] WiFi lost (Event). Reconnecting...");
+          WiFi.reconnect();
+      }
+  });
+
   // First try to connect using stored credentials
   if (connectToStoredNetwork()) {
     return true;
@@ -83,21 +115,31 @@ bool WiFiManager::connectToNetwork(const String& ssid, const String& password) {
   WiFi.mode(WIFI_STA);
   // Important for stable streaming: Disable WiFi Power Save
   WiFi.setSleep(false);
+  esp_wifi_set_ps(WIFI_PS_NONE); // IDF-level disable
   
-  if (STATIC_IP_ENABLED) {
-    IPAddress ip(STATIC_IP_ADDR);
-    IPAddress gateway(STATIC_GATEWAY);
-    IPAddress subnet(STATIC_SUBNET);
-    IPAddress dns(STATIC_DNS);
-    
-    if (WiFi.config(ip, gateway, subnet, dns)) {
-      Serial.println("[INFO] Static IP Configured: " + ip.toString());
-    } else {
-      Serial.println(F("[WARN] Static IP Configuration Failed. Falling back to DHCP."));
-    }
+  if (rtc_valid) {
+      Serial.println("[INFO] Fast Reconnect: Using RTC variables.");
+      IPAddress ip(rtc_ip);
+      IPAddress gw(rtc_gw);
+      IPAddress mask(rtc_mask);
+      WiFi.config(ip, gw, mask);
+      WiFi.begin(ssid.c_str(), password.c_str(), rtc_channel, rtc_bssid, true);
+  } else {
+      if (STATIC_IP_ENABLED) {
+        IPAddress ip(STATIC_IP_ADDR);
+        IPAddress gateway(STATIC_GATEWAY);
+        IPAddress subnet(STATIC_SUBNET);
+        IPAddress dns(STATIC_DNS);
+        
+        if (WiFi.config(ip, gateway, subnet, dns)) {
+          Serial.println("[INFO] Static IP Configured: " + ip.toString());
+        } else {
+          Serial.println(F("[WARN] Static IP Configuration Failed. Falling back to DHCP."));
+        }
+      }
+      WiFi.begin(ssid.c_str(), password.c_str());
   }
   
-  WiFi.begin(ssid.c_str(), password.c_str());
   status_led_wifi_connecting();
   
   Serial.print(F("[INFO] Connecting to WiFi: "));
@@ -114,10 +156,20 @@ bool WiFiManager::connectToNetwork(const String& ssid, const String& password) {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\n[INFO] WiFi connected: " + WiFi.localIP().toString());
     status_led_connected();
+    
+    // Save to RTC for fast reconnect
+    rtc_ip = WiFi.localIP();
+    rtc_gw = WiFi.gatewayIP();
+    rtc_mask = WiFi.subnetMask();
+    rtc_channel = WiFi.channel();
+    memcpy(rtc_bssid, WiFi.BSSID(), 6);
+    rtc_valid = true;
+    
     return true;
   } else {
     Serial.println(F("\n[ERROR] WiFi connect failed."));
     status_led_error();
+    rtc_valid = false; // Invalidate RTC data
     return false;
   }
 }

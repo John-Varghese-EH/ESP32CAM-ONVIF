@@ -15,7 +15,9 @@ enum RTSP_CMD_TYPES
     RTSP_UNKNOWN
 };
 
-#define RTSP_BUFFER_SIZE       10000    // for incoming requests, and outgoing responses
+// Buffer sizes — tuned for ESP32 SRAM constraints.
+// RTSP requests are typically <500 bytes; 2KB is generous.
+#define RTSP_BUFFER_SIZE       2048
 #define RTSP_PARAM_STRING_MAX  200
 #define MAX_HOSTNAME_LEN       256
 
@@ -30,7 +32,6 @@ public:
 
     /**
        Read from our socket, parsing commands as possible.
-
        return false if the read timed out
      */
     bool handleRequests(uint32_t readTimeoutMs);
@@ -55,24 +56,20 @@ private:
     void Handle_RtspPLAY();
     void Handle_RtspGET_PARAMETER();
 
-    // global session state parameters
+    // Session state
     int m_RtspSessionID;
-    SOCKET m_RtspClient;                                      // RTSP socket of that session
-    int m_StreamID;                                           // number of simulated stream of that session
-    IPPORT m_ClientRTPPort;                                  // client port for UDP based RTP transport
-    IPPORT m_ClientRTCPPort;                                 // client port for UDP based RTCP transport
-    bool m_TcpTransport;                                      // if Tcp based streaming was activated
-    CStreamer    * m_Streamer;                                // the UDP or TCP streamer of that session
+    SOCKET m_RtspClient;                                      // RTSP socket (WiFiClient*)
+    int m_StreamID;                                           // stream index
+    IPPORT m_ClientRTPPort;                                   // client RTP port (UDP)
+    IPPORT m_ClientRTCPPort;                                  // client RTCP port (UDP)
+    bool m_TcpTransport;                                      // true = RTP-over-TCP
+    CStreamer * m_Streamer;                                    // media streamer
 
-public:
-    void* m_ClientPtr;                                        // Pointer to WiFiClient for memory management
-
-    // parameters of the last received RTSP request
-
-    RTSP_CMD_TYPES m_RtspCmdType;                             // command type (if any) of the current request
-    char m_URLPreSuffix[RTSP_PARAM_STRING_MAX];               // stream name pre suffix
-    char m_URLSuffix[RTSP_PARAM_STRING_MAX];                  // stream name suffix
-    char m_CSeq[RTSP_PARAM_STRING_MAX];                       // RTSP command sequence number
-    char m_URLHostPort[MAX_HOSTNAME_LEN];                     // host:port part of the URL
-    unsigned m_ContentLength;                                 // SDP string size
+    // Last parsed RTSP request fields
+    RTSP_CMD_TYPES m_RtspCmdType;
+    char m_URLPreSuffix[RTSP_PARAM_STRING_MAX];
+    char m_URLSuffix[RTSP_PARAM_STRING_MAX];
+    char m_CSeq[RTSP_PARAM_STRING_MAX];
+    char m_URLHostPort[MAX_HOSTNAME_LEN];
+    unsigned m_ContentLength;
 };
