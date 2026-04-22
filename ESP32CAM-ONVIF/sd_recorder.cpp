@@ -9,6 +9,11 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 
+// Forward declarations
+void start_new_segment();
+void manage_storage();
+void sd_write_task(void *pvParameters);
+
   // static internal flag to track state
   static bool _sdMountSuccess = false;
   static QueueHandle_t sd_queue = NULL;
@@ -64,9 +69,6 @@ bool _manualRecording = false; // Flag for manual web trigger
 int _segmentCounter = 0;
 int _framesSinceFlush = 0;  // Track frames for periodic flush
 
-// Forward declarations
-void start_new_segment();
-void manage_storage();
 
 void manage_storage() {
     float total = SD_MMC.totalBytes();

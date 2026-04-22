@@ -36,39 +36,79 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+            echo "TAG_NAME=v${{ github.event.inputs.version }}" >> $GITHUB_ENV
           else
             # Extract version from tag (remove 'v' prefix)
             TAG_VERSION=${GITHUB_REF_NAME#v}
             echo "VERSION=$TAG_VERSION" >> $GITHUB_ENV
+            echo "TAG_NAME=${GITHUB_REF_NAME}" >> $GITHUB_ENV
           fi
 
       - name: Update Firmware Version in config.h
         run: |
-          echo "Updating FIRMWARE_VERSION to $VERSION in config.h"
-          # Use sed to replace the FIRMWARE_VERSION string in config.h
-          sed -i "s/#define FIRMWARE_VERSION \".*\"/#define FIRMWARE_VERSION \"$VERSION\"/" ESP32CAM-ONVIF/config.h
-          cat ESP32CAM-ONVIF/config.h | grep FIRMWARE_VERSION
+          echo "Updating FIRMWARE_VERSION to v$VERSION in config.h"
+          sed -i "s/#define FIRMWARE_VERSION \".*\"/#define FIRMWARE_VERSION \"v$VERSION\"/" ESP32CAM-ONVIF/config.h
+          echo "--- Verification ---"
+          grep FIRMWARE_VERSION ESP32CAM-ONVIF/config.h
+
+      - name: Rebuild Web UI (index_html.h)
+        run: |
+          echo "Regenerating embedded WebUI header..."
+          python utils/build_web.py
+          echo "--- index_html.h size ---"
+          ls -lh ESP32CAM-ONVIF/index_html.h
 
       - name: Build Firmware (esp32cam)
         run: pio run -e esp32cam
 
-      - name: Rename firmware binary
-        run: |
-          mv .pio/build/esp32cam/firmware.bin esp32cam-onvif-${{ env.VERSION }}.bin
+      - name: Build SPIFFS Filesystem Image
+        run: pio run -e esp32cam -t buildfs
 
-      - name: Create Release and Upload Asset
+      - name: Rename build artifacts
+        run: |
+          cp .pio/build/esp32cam/firmware.bin esp32cam-onvif-${{ env.VERSION }}.bin
+          cp .pio/build/esp32cam/spiffs.bin   esp32cam-onvif-${{ env.VERSION }}-spiffs.bin
+          echo "--- Build Artifacts ---"
+          ls -lh esp32cam-onvif-*.bin
+          echo ""
+          echo "Firmware SHA256:"
+          sha256sum esp32cam-onvif-${{ env.VERSION }}.bin
+          echo "SPIFFS SHA256:"
+          sha256sum esp32cam-onvif-${{ env.VERSION }}-spiffs.bin
+
+      - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: esp32cam-onvif-${{ env.VERSION }}.bin
-          name: Release ${{ env.VERSION }}
+          files: |
+            esp32cam-onvif-${{ env.VERSION }}.bin
+            esp32cam-onvif-${{ env.VERSION }}-spiffs.bin
+          name: "ESP32-CAM ONVIF v${{ env.VERSION }}"
           draft: false
           prerelease: false
           generate_release_notes: true
+          body: |
+            ## Firmware v${{ env.VERSION }}
 
-      - name: Upload Artifact (for workflow_dispatch)
+            ### Download & Flash
+            | File | Purpose | Flash Command |
+            |------|---------|---------------|
+            | `esp32cam-onvif-${{ env.VERSION }}.bin` | **Firmware** (OTA-compatible) | `pio run -t upload` or WebUI OTA |
+            | `esp32cam-onvif-${{ env.VERSION }}-spiffs.bin` | **SPIFFS Filesystem** | `pio run -t uploadfs` |
+
+            ### OTA Update
+            You can update directly from the Web UI:
+            1. Open `http://<ESP32-IP>` → System → Firmware Update
+            2. Click **Check for Updates** to auto-detect this release
+            3. Click **Install** to flash over-the-air
+
+            Or upload the `.bin` file manually via the **Manual Upload** option.
+
+      - name: Upload Artifacts (for workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: esp32cam-onvif-${{ env.VERSION }}
-          path: esp32cam-onvif-${{ env.VERSION }}.bin
+          path: |
+            esp32cam-onvif-${{ env.VERSION }}.bin
+            esp32cam-onvif-${{ env.VERSION }}-spiffs.bin

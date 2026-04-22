@@ -51,8 +51,7 @@
 // #define BOARD_SEEED_XIAO_S3        // Seeed XIAO ESP32S3 Sense
 // #define BOARD_ESP32S3_EYE          // ESP32-S3-EYE from Espressif
 // #define BOARD_ESP32P4_FUNCTION_EV  // ESP32-P4-Function-EV-Board (H.264 HW!)
-// #define BOARD_CUSTOM               // Custom board - define pins in
-// board_config.h
+// #define BOARD_CUSTOM               // Custom board - define pins in board_config.h
 
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃ SECTION 2: VIDEO CODEC SELECTION [CRITICAL]                            ┃
@@ -229,7 +228,7 @@
 #define DEVICE_HARDWARE_ID "ESP32CAM-J0X"
 
 // --- OTA Updates ---
-#define FIRMWARE_VERSION "v1.4.0"
+// FIRMWARE_VERSION is defined at the top of this file (line 11)
 #define GITHUB_REPO_OWNER "John-Varghese-EH"
 #define GITHUB_REPO_NAME "ESP32CAM-ONVIF"
 
@@ -246,7 +245,7 @@
 // ┃ SECTION 10: MQTT & HOME ASSISTANT CONFIGURATION [OPTIONAL]             ┃
 // ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
-#define MQTT_ENABLED true           // Set to false to disable MQTT
+#define MQTT_ENABLED false           // Set to false to disable MQTT
 #define MQTT_BROKER "192.168.1.100" // MQTT Broker IP or Hostname
 #define MQTT_PORT 1883              // Default MQTT Port
 #define MQTT_USER "homeassistant"   // MQTT Username (leave empty if none)

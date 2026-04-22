@@ -1471,6 +1471,18 @@ void handle_onvif_discovery() {
   } // End if(packetSize > 0)
 } // End function
 
+void onvif_reconnect() {
+  // Re-bind WS-Discovery multicast after WiFi reconnection so NVRs can
+  // rediscover the camera on its (potentially new) IP address.
+  onvifUDP.stop();
+  delay(50);
+  if (onvifUDP.beginMulticast(IPAddress(239, 255, 255, 250), 3702)) {
+    Serial.println("[INFO] ONVIF WS-Discovery re-broadcast OK.");
+  } else {
+    Serial.println("[WARN] ONVIF WS-Discovery re-broadcast failed.");
+  }
+}
+
 void onvif_server_start() {
   onvifServer.on("/onvif/device_service", HTTP_POST, handle_onvif_soap);
   onvifServer.on("/onvif/ptz_service", HTTP_POST,
