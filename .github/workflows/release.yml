@@ -1,0 +1,74 @@
+name: Build and Release Firmware
+
+on:
+  push:
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Firmware Version (e.g. 1.4.0)'
+        required: true
+        default: 'manual'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Need write permission to create release
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio
+
+      - name: Determine Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+          else
+            # Extract version from tag (remove 'v' prefix)
+            TAG_VERSION=${GITHUB_REF_NAME#v}
+            echo "VERSION=$TAG_VERSION" >> $GITHUB_ENV
+          fi
+
+      - name: Update Firmware Version in config.h
+        run: |
+          echo "Updating FIRMWARE_VERSION to $VERSION in config.h"
+          # Use sed to replace the FIRMWARE_VERSION string in config.h
+          sed -i "s/#define FIRMWARE_VERSION \".*\"/#define FIRMWARE_VERSION \"$VERSION\"/" ESP32CAM-ONVIF/config.h
+          cat ESP32CAM-ONVIF/config.h | grep FIRMWARE_VERSION
+
+      - name: Build Firmware (esp32cam)
+        run: pio run -e esp32cam
+
+      - name: Rename firmware binary
+        run: |
+          mv .pio/build/esp32cam/firmware.bin esp32cam-onvif-${{ env.VERSION }}.bin
+
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: esp32cam-onvif-${{ env.VERSION }}.bin
+          name: Release ${{ env.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+      - name: Upload Artifact (for workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32cam-onvif-${{ env.VERSION }}
+          path: esp32cam-onvif-${{ env.VERSION }}.bin
