@@ -15,8 +15,12 @@
 #include "wifi_manager.h"
 #include "config.h"
 #include <Update.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <esp_task_wdt.h>
 #include "sd_recorder.h"
+#include "mqtt_manager.h"
+#include "webdav_server.h"
 #ifdef BLUETOOTH_ENABLED
   #include "bluetooth_manager.h"
   #include "audio_manager.h"
@@ -90,7 +94,8 @@ void web_config_start() {
         if (!webConfigServer.authenticate(WEB_USER, WEB_PASS)) {
            return webConfigServer.requestAuthentication();
         }
-        webConfigServer.send_P(200, "text/html", index_html);
+        webConfigServer.sendHeader("Content-Encoding", "gzip");
+        webConfigServer.send_P(200, "text/html", (const char*)index_html_gz, index_html_gz_len);
     });
 
     // --- API ENDPOINTS ---
@@ -274,11 +279,19 @@ void web_config_start() {
         webConfigServer.send(200, "application/json", "{}");
     });
 
-    // --- Reboot ---
+    // --- Reboot (GET - legacy) ---
     webConfigServer.on("/reboot", []() {
         if (!isAuthenticated(webConfigServer)) return;
         webConfigServer.send(200, "application/json", "{\"ok\":1, \"msg\":\"Rebooting...\"}");
-        delay(1000);
+        delay(500);
+        ESP.restart();
+    });
+
+    // --- Reboot (POST - proper REST API) ---
+    webConfigServer.on("/api/reboot", HTTP_POST, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        webConfigServer.send(200, "application/json", "{\"ok\":1, \"msg\":\"Rebooting...\"}");
+        delay(500);
         ESP.restart();
     });
 
@@ -290,14 +303,191 @@ void web_config_start() {
         ESP.restart();
     });
 
-    // --- System Information (Enhanced with RSSI, FPS, etc.) ---
+    // --- OTA Update (WebUI Upload) ---
+    webConfigServer.on("/api/update", HTTP_POST, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        webConfigServer.sendHeader("Connection", "close");
+        webConfigServer.send(200, "application/json", Update.hasError() ? "{\"ok\":0,\"msg\":\"Update failed\"}" : "{\"ok\":1,\"msg\":\"Update successful. Rebooting...\"}");
+        if (!Update.hasError()) {
+            delay(1000);
+            ESP.restart();
+        }
+    }, []() {
+        if (!webConfigServer.authenticate(WEB_USER, WEB_PASS)) return;
+        HTTPUpload& upload = webConfigServer.upload();
+        if (upload.status == UPLOAD_FILE_START) {
+            Serial.printf("[OTA] Update Start: %s\n", upload.filename.c_str());
+            if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_WRITE) {
+            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_END) {
+            if (Update.end(true)) {
+                Serial.printf("[OTA] Update Success: %u bytes\n", upload.totalSize);
+            } else {
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_ABORTED) {
+            Update.end();
+            Serial.println("[OTA] Update was aborted");
+        }
+        delay(0);
+    });
+
+    // --- GitHub Auto Updates Globals ---
+    static String s_latest_version = "";
+    static String s_download_url = "";
+    static volatile int s_ota_progress = 0; // 0-100, or -1 for error
+    static String s_ota_msg = "";
+
+    // --- GitHub Check ---
+    webConfigServer.on("/api/update/check", HTTP_GET, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        
+        Serial.println("[OTA] Fetching latest release from GitHub...");
+        WiFiClientSecure client;
+        client.setInsecure();
+        HTTPClient http;
+        
+        const char* repoApi = "https://api.github.com/repos/John-Varghese-EH/ESP32CAM-ONVIF/releases/latest";
+        if (http.begin(client, repoApi)) {
+            int httpCode = http.GET();
+            if (httpCode == HTTP_CODE_OK) {
+                String payload = http.getString();
+                
+                // Extract version tag
+                String latestVer = "";
+                int tagStart = payload.indexOf("\"tag_name\":");
+                if (tagStart > 0) {
+                    tagStart = payload.indexOf("\"", tagStart + 11) + 1;
+                    int tagEnd = payload.indexOf("\"", tagStart);
+                    latestVer = payload.substring(tagStart, tagEnd);
+                }
+                
+                // Extract download URL
+                String firmwareUrl = "";
+                int urlStart = payload.indexOf("\"browser_download_url\":");
+                if (urlStart > 0) {
+                    urlStart = payload.indexOf("\"", urlStart + 23) + 1;
+                    int urlEnd = payload.indexOf("\"", urlStart);
+                    firmwareUrl = payload.substring(urlStart, urlEnd);
+                }
+                
+                http.end();
+                
+                s_latest_version = latestVer;
+                s_download_url = firmwareUrl;
+                
+                String json = "{\"current_version\":\"" FIRMWARE_VERSION "\",\"latest_version\":\"" + latestVer + "\",\"download_url\":\"" + firmwareUrl + "\"}";
+                webConfigServer.send(200, "application/json", json);
+            } else {
+                http.end();
+                webConfigServer.send(200, "application/json", "{\"error\":\"Failed to fetch GitHub release\"}");
+            }
+        } else {
+            webConfigServer.send(200, "application/json", "{\"error\":\"Connection failed\"}");
+        }
+    });
+
+    // --- GitHub Install ---
+    webConfigServer.on("/api/update/github", HTTP_POST, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        
+        StaticJsonDocument<256> doc;
+        deserializeJson(doc, webConfigServer.arg("plain"));
+        String url = doc["url"].as<String>();
+        
+        if (url == "") url = s_download_url;
+        
+        if (url == "") {
+            webConfigServer.send(200, "application/json", "{\"error\":\"No download URL provided\"}");
+            return;
+        }
+        
+        s_ota_progress = 0;
+        s_ota_msg = "Downloading firmware...";
+        
+        // Start background FreeRTOS task for downloading
+        // We must duplicate the string so it survives
+        char* url_copy = strdup(url.c_str());
+        xTaskCreatePinnedToCore([](void* pvParam) {
+            char* downloadUrl = (char*)pvParam;
+            
+            WiFiClientSecure client;
+            client.setInsecure();
+            HTTPClient http;
+            
+            if (http.begin(client, downloadUrl)) {
+                http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+                int fwCode = http.GET();
+                if (fwCode == HTTP_CODE_OK) {
+                    int contentLength = http.getSize();
+                    bool canBegin = Update.begin(contentLength);
+                    if (canBegin) {
+                        WiFiClient* stream = http.getStreamPtr();
+                        size_t written = 0;
+                        uint8_t buf[1024];
+                        while (http.connected() && (written < contentLength)) {
+                            size_t available = stream->available();
+                            if (available) {
+                                size_t toRead = (available > sizeof(buf)) ? sizeof(buf) : available;
+                                size_t c = stream->readBytes(buf, toRead);
+                                Update.write(buf, c);
+                                written += c;
+                                
+                                s_ota_progress = (int)((written * 100) / contentLength);
+                                if (s_ota_progress > 99) s_ota_progress = 99; // Cap at 99 until end
+                            }
+                            delay(1);
+                        }
+                        
+                        if (written == contentLength && Update.end()) {
+                            s_ota_progress = 100;
+                            s_ota_msg = "Rebooting...";
+                            delay(1000);
+                            ESP.restart();
+                        } else {
+                            s_ota_progress = -1;
+                            s_ota_msg = "Write failed";
+                        }
+                    } else {
+                        s_ota_progress = -1;
+                        s_ota_msg = "Not enough space";
+                    }
+                } else {
+                    s_ota_progress = -1;
+                    s_ota_msg = "HTTP GET failed";
+                }
+                http.end();
+            } else {
+                s_ota_progress = -1;
+                s_ota_msg = "Connection failed";
+            }
+            free(downloadUrl);
+            vTaskDelete(NULL);
+        }, "github_ota_task", 8192, url_copy, 1, NULL, 1);
+        
+        webConfigServer.send(200, "application/json", "{\"success\":true}");
+    });
+
+    // --- GitHub Status ---
+    webConfigServer.on("/api/update/status", HTTP_GET, []() {
+        if (!isAuthenticated(webConfigServer)) return;
+        
+        String json = "{\"progress\":" + String(s_ota_progress) + ",\"message\":\"" + s_ota_msg + "\"}";
+        webConfigServer.send(200, "application/json", json);
+    });
+
     webConfigServer.on("/api/system/info", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
         
         sensor_t * s = esp_camera_sensor_get();
         framesize_t res = s->status.framesize;
         
-        String resolution = "Unknown";
+        const char* resolution = "Custom";
         switch(res) {
             case FRAMESIZE_QQVGA: resolution = "QQVGA (160x120)"; break;
             case FRAMESIZE_QVGA:  resolution = "QVGA (320x240)"; break;
@@ -306,45 +496,44 @@ void web_config_start() {
             case FRAMESIZE_HD:    resolution = "HD (1280x720)"; break;
             case FRAMESIZE_SXGA:  resolution = "SXGA (1280x1024)"; break;
             case FRAMESIZE_UXGA:  resolution = "UXGA (1600x1200)"; break;
-            default: resolution = "Custom"; break;
+            default: break;
         }
         
-        String codec = "MJPEG";
+        const char* codec = "MJPEG";
         #ifdef VIDEO_CODEC_H264
             codec = "H.264";
         #endif
         
-        int rssi = WiFi.RSSI();
-        
-        // Get flash partition info
         size_t flash_size = ESP.getFlashChipSize();
         size_t sketch_size = ESP.getSketchSize();
-        size_t free_flash = flash_size - sketch_size;
-        
-        // PSRAM info (if available)
-        size_t psram_size = 0;
-        size_t psram_free = 0;
+        size_t psram_size = 0, psram_free = 0;
         #ifdef BOARD_HAS_PSRAM
             psram_size = ESP.getPsramSize();
             psram_free = ESP.getFreePsram();
         #endif
         
-        String json = "{";
-        json += "\"rssi\":" + String(rssi) + ",";
-        json += "\"resolution\":\"" + resolution + "\",";
-        json += "\"codec\":\"" + codec + "\",";
-        json += "\"quality\":" + String(s->status.quality) + ",";
-        json += "\"brightness\":" + String(s->status.brightness) + ",";
-        json += "\"contrast\":" + String(s->status.contrast) + ",";
-        json += "\"saturation\":" + String(s->status.saturation) + ",";
-        json += "\"flash_total\":" + String(flash_size) + ",";
-        json += "\"flash_used\":" + String(sketch_size) + ",";
-        json += "\"flash_free\":" + String(free_flash) + ",";
-        json += "\"psram_total\":" + String(psram_size) + ",";
-        json += "\"psram_free\":" + String(psram_free);
-        json += "}";
+        // Build JSON with snprintf — zero heap allocations
+        static char infoBuf[512];
+        snprintf(infoBuf, sizeof(infoBuf),
+            "{\"rssi\":%d,"
+            "\"resolution\":\"%s\","
+            "\"codec\":\"%s\","
+            "\"quality\":%d,"
+            "\"brightness\":%d,"
+            "\"contrast\":%d,"
+            "\"saturation\":%d,"
+            "\"flash_total\":%u,"
+            "\"flash_used\":%u,"
+            "\"flash_free\":%u,"
+            "\"psram_total\":%u,"
+            "\"psram_free\":%u}",
+            WiFi.RSSI(), resolution, codec,
+            s->status.quality, s->status.brightness,
+            s->status.contrast, s->status.saturation,
+            flash_size, sketch_size, flash_size - sketch_size,
+            psram_size, psram_free);
         
-        webConfigServer.send(200, "application/json", json);
+        webConfigServer.send(200, "application/json", infoBuf);
     });
     
     // --- Camera Quality Presets ---
@@ -805,32 +994,6 @@ void web_config_start() {
              webConfigServer.send(400, "application/json", "{\"error\":\"Invalid time\"}");
         }
     });
-
-    // --- OTA Firmware Update ---
-    webConfigServer.on("/api/update", HTTP_POST, []() {
-        webConfigServer.send(200, "application/json", (Update.hasError()) ? "{\"success\":false}" : "{\"success\":true}");
-        delay(1000);
-        ESP.restart();
-    }, []() {
-        HTTPUpload& upload = webConfigServer.upload();
-        if (upload.status == UPLOAD_FILE_START) {
-            Serial.printf("[INFO] Update: %s\n", upload.filename.c_str());
-            if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { 
-                Update.printError(Serial);
-            }
-        } else if (upload.status == UPLOAD_FILE_WRITE) {
-            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-                Update.printError(Serial);
-            }
-        } else if (upload.status == UPLOAD_FILE_END) {
-            if (Update.end(true)) { 
-                Serial.printf("[INFO] Update Success: %u\n", upload.totalSize);
-            } else {
-                Update.printError(Serial);
-            }
-        }
-    });
-    
     // --- WiFi API Endpoints ---
     webConfigServer.on("/api/wifi/status", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;

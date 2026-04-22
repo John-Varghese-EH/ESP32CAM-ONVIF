@@ -67,3 +67,4 @@ onvif-server/
 go2rtc_win64/
 
 .agent/
+/reference

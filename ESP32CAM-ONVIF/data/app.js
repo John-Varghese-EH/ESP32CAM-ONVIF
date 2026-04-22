@@ -33,11 +33,27 @@ const api = async (ep, opts = {}, timeoutMs = 10000) => {
     }
 };
 
-function showToast(msg) {
-    const t = el('rec-toast');
-    t.innerText = msg;
-    t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 3000);
+// Enhanced toast system with types and stacking
+function showToast(msg, type = 'info') {
+    const container = el('toast-container');
+    if (!container) {
+        // Fallback to old toast if container doesn't exist
+        const t = el('rec-toast');
+        if (t) { t.innerText = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+        return;
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast-item toast-${type}`;
+    const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+    toast.innerHTML = `<span style="font-size:1.1rem;min-width:16px;text-align:center">${icons[type] || icons.info}</span><span style="flex:1">${msg}</span><div class="toast-progress"></div>`;
+    container.appendChild(toast);
+    // Auto-remove after 3.2s
+    setTimeout(() => {
+        toast.classList.add('removing');
+        setTimeout(() => toast.remove(), 250);
+    }, 3200);
+    // Max 4 toasts
+    while (container.children.length > 4) container.firstChild.remove();
 }
 
 // ==================== TABS ====================
@@ -51,7 +67,7 @@ function setTab(id, event) {
         event.target.classList.add('active');
     }
     if (id === 'net') { updateWifi(); updateBt(); }
-    if (id === 'sys') { updateSystemInfo(); updateSDInfo(); }
+    if (id === 'sys') { updateSystemInfo(); updateSDInfo(); checkForUpdates(); }
     if (id === 'events') updateEventLog();
     if (id === 'recordings') loadRecordings();
     
@@ -172,22 +188,28 @@ async function toggleRecord() {
         } else {
             // SD Card
             await api('/api/record', { method: 'POST', body: JSON.stringify({ action: 'start' }) });
-            showToast("Recording to SD Card 💾");
+            showToast("Recording to SD Card", 'success');
         }
         isRecording = true;
         btn.innerHTML = '⬛'; // Stop icon
         btn.classList.add('pulse');
+        // Add recording visual state to video container
+        const vcont = el('vcont');
+        if (vcont) vcont.classList.add('recording');
     } else {
         // Stop
         if (mode === 'device') {
             stopClientRecord();
         } else {
             await api('/api/record', { method: 'POST', body: JSON.stringify({ action: 'stop' }) });
-            showToast("Recording Stopped");
+            showToast("Recording stopped", 'info');
         }
         isRecording = false;
         btn.innerHTML = '🔴';
         btn.classList.remove('pulse');
+        // Remove recording visual state
+        const vcont = el('vcont');
+        if (vcont) vcont.classList.remove('recording');
     }
 }
 
@@ -519,7 +541,7 @@ async function updateEventLog() {
                                 '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/></svg>';
 
             const item = document.createElement('div');
-            item.className = 'event-item';
+            item.className = `event-item ${e.type}`;
             item.innerHTML = `
                 <span class="event-time">${timeStr}</span>
                 <span class="event-icon">${icon}</span>
@@ -646,6 +668,7 @@ function quickToggleONVIF() {
 
 // ==================== System Information ====================
 async function updateSystemInfo() {
+    loadIntegrations();
     const d = await api('/api/system/info');
     if (d) {
         if (el('info-resolution')) el('info-resolution').innerText = d.resolution;
@@ -1020,6 +1043,7 @@ function startOTA() {
 }
 
 // ==================== STATUS LOOP ====================
+let resGraph = { ts: [], heap: [], psram: [] };
 async function updateStatus() {
     const d = await api('/api/status');
     if (d) {
@@ -1204,6 +1228,10 @@ window.addEventListener('beforeunload', cleanup);
 
 // ==================== INIT ====================
 window.onload = () => {
+    // Restore theme preference
+    const savedTheme = localStorage.getItem('esp32cam_theme');
+    if (savedTheme === 'light') document.body.classList.add('light-theme');
+
     el('stream').src = '/stream?t=' + Date.now();
     updateStatus();
     updateWifi();

@@ -5,10 +5,12 @@
 #include "board_config.h"
 #include "CRtspSession.h"
 
-// Conditionally include the appropriate streamer
+// Include both streamers — the H.264 path may fall back to MyStreamer
 #ifdef VIDEO_CODEC_H264
     #include "H264Streamer.h"
-    extern H264Streamer *streamer;
+    #include "MyStreamer.h"
+    // NOTE: streamer is CStreamer* (base class) to support MJPEG fallback
+    extern CStreamer *streamer;
 #else
     #include "MyStreamer.h"
     extern MyStreamer *streamer;
@@ -20,5 +22,4 @@ String getRTSPUrl();
 void rtsp_server_start();
 void rtsp_server_loop();
 
-// Get current codec name for display
 const char* getCodecName();

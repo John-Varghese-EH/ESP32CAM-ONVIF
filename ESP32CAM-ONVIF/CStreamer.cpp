@@ -4,7 +4,7 @@
 
 CStreamer::CStreamer(SOCKET aClient, u_short width, u_short height) : m_Client(aClient)
 {
-    printf("Creating TSP streamer\n");
+    printf("Creating RTP streamer\n");
     m_RtpServerPort  = 0;
     m_RtcpServerPort = 0;
     m_RtpClientPort  = 0;
@@ -102,7 +102,7 @@ int CStreamer::SendRtpPacket(unsigned const char * jpeg, int jpegLen, int fragme
         memcpy(RtpBuf + headerLen, quant1tbl, numQantBytes);
         headerLen += numQantBytes;
     }
-    // printf("Sending timestamp %d, seq %d, fragoff %d, fraglen %d, jpegLen %d\n", m_Timestamp, m_SequenceNumber, fragmentOffset, fragmentLen, jpegLen);
+
 
     // append the JPEG scan data to the RTP buffer
     memcpy(RtpBuf + headerLen,jpeg + fragmentOffset, fragmentLen);
@@ -217,9 +217,6 @@ bool findJPEGheader(BufPtr *start, uint32_t *len, uint8_t marker) {
     // per https://en.wikipedia.org/wiki/JPEG_File_Interchange_Format
     unsigned const char *bytes = *start;
 
-    // kinda skanky, will break if unlucky and the headers inxlucde 0xffda
-    // might fall off array if jpeg is invalid
-    // FIXME - return false instead
     while(bytes - *start < *len) {
         uint8_t framing = *bytes++; // better be 0xff
         if(framing != 0xff) {
@@ -229,7 +226,6 @@ bool findJPEGheader(BufPtr *start, uint32_t *len, uint8_t marker) {
         uint8_t typecode = *bytes++;
         if(typecode == marker) {
             unsigned skipped = bytes - *start;
-            //printf("found marker 0x%x, skipped %d\n", marker, skipped);
 
             *start = bytes;
 
@@ -253,7 +249,6 @@ bool findJPEGheader(BufPtr *start, uint32_t *len, uint8_t marker) {
             {
                 // standard format section with 2 bytes for len.  skip that many bytes
                 uint32_t len = bytes[0] * 256 + bytes[1];
-                //printf("skipping section 0x%x, %d bytes\n", typecode, len);
                 bytes += len;
                 break;
             }

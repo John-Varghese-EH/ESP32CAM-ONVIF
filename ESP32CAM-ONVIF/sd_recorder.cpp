@@ -5,17 +5,26 @@
 
 #include "config.h"
 #include "wifi_manager.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+
+// Forward declarations
+void start_new_segment();
+void manage_storage();
+void sd_write_task(void *pvParameters);
 
   // static internal flag to track state
   static bool _sdMountSuccess = false;
+  static QueueHandle_t sd_queue = NULL;
+  static TaskHandle_t sd_task_handle = NULL;
 
   void sd_recorder_init() {
   _sdMountSuccess = false;
   
-  // Optimization: Do not init if recording is disabled
-  if (!ENABLE_DAILY_RECORDING) {
-      Serial.println("[INFO] Recording disabled. SD Card Init skipped.");
-      return;
+  // Optimization: Do not init if recording is disabled (unless manually triggered later)
+  if (!appSettings.continuousRecordingEnabled) {
+      Serial.println("[INFO] Continuous Recording disabled. SD will be used for manual/WebDAV only.");
   }
 
   bool mountAttempt = false;
@@ -41,6 +50,14 @@
   }
   Serial.println("[INFO] SD Card initialized");
   _sdMountSuccess = true;
+
+  if (sd_queue == NULL) {
+      sd_queue = xQueueCreate(2, sizeof(camera_fb_t *)); // Max 2 frames in queue
+  }
+  if (sd_task_handle == NULL) {
+      // Create SD writer task on Core 1
+      xTaskCreatePinnedToCore(sd_write_task, "SD_Write_Task", 4096, NULL, 1, &sd_task_handle, 1);
+  }
 }
 
 // --- Recording Globals ---
@@ -112,6 +129,46 @@ void sd_recorder_stop_segment() {
     _isRecording = false;
 }
 
+void sd_write_task(void *pvParameters) {
+    camera_fb_t *fb = NULL;
+    while (1) {
+        if (xQueueReceive(sd_queue, &fb, portMAX_DELAY) == pdTRUE) {
+            bool shouldRecord = appSettings.continuousRecordingEnabled || _manualRecording;
+            
+            if (!shouldRecord || !_sdMountSuccess) {
+                if (_isRecording) {
+                    sd_recorder_stop_segment();
+                }
+                esp_camera_fb_return(fb);
+                continue;
+            }
+
+            unsigned long now = millis();
+            
+            // Init if needed or rollover segment
+            if (!_isRecording || (now - _currentSegmentStart > (appSettings.continuousRecordingChunkSize * 60 * 1000UL))) {
+                start_new_segment();
+            }
+
+            if (_isRecording && _recordFile) {
+                if (_recordFile.write(fb->buf, fb->len) != fb->len) {
+                    Serial.println("[ERROR] Write failed. Disk full?");
+                    _recordFile.close();
+                    _isRecording = false;
+                } else {
+                    _framesSinceFlush++;
+                    if (_framesSinceFlush >= 10) {
+                        _recordFile.flush();
+                        _framesSinceFlush = 0;
+                    }
+                }
+            }
+            
+            esp_camera_fb_return(fb);
+        }
+    }
+}
+
 void sd_recorder_start_manual() {
     if (_manualRecording) return;
     Serial.println("[INFO] Manual Recording START");
@@ -127,7 +184,7 @@ void sd_recorder_stop_manual() {
 }
 
 bool sd_recorder_is_recording() {
-    return _manualRecording || (ENABLE_DAILY_RECORDING && _sdMountSuccess);
+    return _manualRecording || (appSettings.continuousRecordingEnabled && _sdMountSuccess);
 }
 
 bool sd_recorder_is_mounted() {
@@ -139,20 +196,9 @@ void sd_recorder_loop() {
     if (!_sdMountSuccess) return;
 
     // Check if we should be recording
-    bool shouldRecord = ENABLE_DAILY_RECORDING || _manualRecording;
+    bool shouldRecord = appSettings.continuousRecordingEnabled || _manualRecording;
     
-    if (!shouldRecord) {
-        // Ensure we aren't leaving a file open if we just stopped
-        if (_isRecording) {
-            sd_recorder_stop_segment();
-        }
-        return;
-    }
-
-    if (FLASH_LED_ENABLED && !wifiManager.isInAPMode()) { 
-        // Optional optimization: disable recording during heavy WiFi use if causing instability?
-        // But user wants "even if connection fails".
-    }
+    if (!shouldRecord) return;
 
     unsigned long now = millis();
     
@@ -185,7 +231,6 @@ void sd_recorder_loop() {
             }
         }
         
-        esp_camera_fb_return(fb);
         _lastRecordFrame = now;
     }
 }

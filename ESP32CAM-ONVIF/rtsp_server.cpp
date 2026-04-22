@@ -3,6 +3,10 @@
 #include "board_config.h"
 #include "status_led.h"
 
+// Minimum free heap required to accept a new RTSP client.
+// Below this, the ESP32 risks OOM crashes during frame encoding.
+#define MIN_HEAP_FOR_CLIENT  32000
+
 WiFiServer rtspServer(RTSP_PORT);
 CRtspSession *session = nullptr;
 
@@ -45,9 +49,6 @@ static void getH264Resolution(uint16_t &width, uint16_t &height) {
 }
 
 void rtsp_server_start() {
-    // The camera is already initialized in setup() via camera_init().
-    // Create the appropriate streamer based on codec configuration.
-    
     #ifdef VIDEO_CODEC_H264
         Serial.println("[INFO] Creating H.264 streamer...");
         H264Streamer *h264 = new H264Streamer();
@@ -73,58 +74,35 @@ void rtsp_server_start() {
         streamer = new MyStreamer();
         Serial.println("[INFO] RTSP server started at " + getRTSPUrl());
     #endif
-    
+
     rtspServer.begin();
-    
-    // Log board and codec info
+
     #ifdef BOARD_NAME
         Serial.printf("[INFO] Board: %s, Codec: %s\n", BOARD_NAME, getCodecName());
     #endif
 }
 
 void rtsp_server_loop() {
-    // If we have an active session, handle it
-    if (session) {
-        session->handleRequests(0); // 0 timeout means non-blocking
-        
-        // Broadcast video frame
-        // Frame rate limiting based on codec
-        static uint32_t lastFrameTime = 0;
-        uint32_t now = millis();
-        
-        #ifdef VIDEO_CODEC_H264
-            // H.264: Use configured FPS
-            uint32_t frameInterval = 1000 / H264_FPS;
-        #else
-            // MJPEG: ~20 FPS (50ms interval)
-            uint32_t frameInterval = 50;
-        #endif
-        
-        if (now - lastFrameTime > frameInterval) { 
-            if (session && !session->m_stopped) { 
-                session->broadcastCurrentFrame(now);
-            }
-            lastFrameTime = now;
+    // Accept new clients (drains TCP backlog even if we reject)
+    WiFiClient client = rtspServer.available();
+    if (client) {
+        // Guard 1: Only one RTSP session at a time
+        if (session) {
+            Serial.println("[WARN] RTSP Client rejected: session already active");
+            client.stop();
         }
-
-        // Check if the client has disconnected
-        if (session->m_stopped) {
-            Serial.println("[INFO] RTSP client disconnected.");
-            delete session;
-            session = nullptr;
+        // Guard 2: Reject if heap is dangerously low
+        else if (ESP.getFreeHeap() < MIN_HEAP_FOR_CLIENT) {
+            Serial.printf("[WARN] RTSP Client rejected: low heap (%u bytes)\n", ESP.getFreeHeap());
+            client.stop();
         }
-    } else {
-        // No active session, check for new clients
-        WiFiClient client = rtspServer.available();
-        if (client) {
-            // RTSP Crash Fix:
-            // CRtspSession stores the SOCKET (WiFiClient*).
-            // We MUST allocate it on heap to survive this scope.
+        else {
+            // Allocate WiFiClient on heap so it survives this scope
             WiFiClient *clientPtr = new WiFiClient(client);
-            
-            // Ensure streamer is valid
+
+            // Ensure streamer exists
             if (!streamer) {
-                Serial.println("[ERROR] Streamer is NULL! Attempting re-init.");
+                Serial.println("[ERROR] Streamer is NULL! Re-initializing...");
                 #ifdef VIDEO_CODEC_H264
                     if (s_h264Active) {
                         // Retry H.264 init with the same resolution used at startup
@@ -147,11 +125,9 @@ void rtsp_server_loop() {
                     streamer = new MyStreamer();
                 #endif
             }
-            
+
             if (streamer) {
-                // Set client socket for RTP-over-TCP
                 streamer->setClientSocket(clientPtr);
-                
                 session = new CRtspSession(clientPtr, streamer);
                 Serial.printf("[INFO] RTSP Client Connected (%s stream)\n", getCodecName());
                 
@@ -165,7 +141,36 @@ void rtsp_server_loop() {
                 Serial.println("[FATAL] Streamer init failed. Closing client.");
                 clientPtr->stop();
                 delete clientPtr;
-            } 
+            }
+        }
+    }
+
+    // Service existing session
+    if (session) {
+        session->handleRequests(0);  // Non-blocking
+
+        // Frame rate limiting
+        static uint32_t lastFrameTime = 0;
+        uint32_t now = millis();
+
+        #ifdef VIDEO_CODEC_H264
+            uint32_t frameInterval = 1000 / H264_FPS;
+        #else
+            uint32_t frameInterval = 50;  // ~20 FPS
+        #endif
+
+        if (now - lastFrameTime > frameInterval) {
+            if (!session->m_stopped) {
+                session->broadcastCurrentFrame(now);
+            }
+            lastFrameTime = now;
+        }
+
+        // Teardown on disconnect
+        if (session->m_stopped) {
+            Serial.printf("[INFO] RTSP client disconnected (heap: %u)\n", ESP.getFreeHeap());
+            delete session;
+            session = nullptr;
         }
     }
 }

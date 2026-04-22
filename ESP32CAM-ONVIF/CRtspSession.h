@@ -30,7 +30,6 @@ public:
 
     /**
        Read from our socket, parsing commands as possible.
-
        return false if the read timed out
      */
     bool handleRequests(uint32_t readTimeoutMs);
@@ -55,7 +54,7 @@ private:
     void Handle_RtspPLAY();
     void Handle_RtspGET_PARAMETER();
 
-    // global session state parameters
+    // Session state
     int m_RtspSessionID;
     SOCKET m_RtspClient;                                      // RTSP socket of that session
     int m_StreamID;                                           // number of simulated stream of that session
@@ -67,10 +66,11 @@ private:
 
     // parameters of the last received RTSP request
 
-    RTSP_CMD_TYPES m_RtspCmdType;                             // command type (if any) of the current request
-    char m_URLPreSuffix[RTSP_PARAM_STRING_MAX];               // stream name pre suffix
-    char m_URLSuffix[RTSP_PARAM_STRING_MAX];                  // stream name suffix
-    char m_CSeq[RTSP_PARAM_STRING_MAX];                       // RTSP command sequence number
-    char m_URLHostPort[MAX_HOSTNAME_LEN];                     // host:port part of the URL
-    unsigned m_ContentLength;                                 // SDP string size
+    // Last parsed RTSP request fields
+    RTSP_CMD_TYPES m_RtspCmdType;
+    char m_URLPreSuffix[RTSP_PARAM_STRING_MAX];
+    char m_URLSuffix[RTSP_PARAM_STRING_MAX];
+    char m_CSeq[RTSP_PARAM_STRING_MAX];
+    char m_URLHostPort[MAX_HOSTNAME_LEN];
+    unsigned m_ContentLength;
 };

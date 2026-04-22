@@ -55,6 +55,19 @@ bool camera_init() {
   }
   Serial.println("[INFO] Camera initialized.");
   
+  sensor_t *s = esp_camera_sensor_get();
+  if (s != nullptr) {
+      s->set_brightness(s, 0);
+      s->set_saturation(s, 0);
+      s->set_gainceiling(s, (gainceiling_t)2);
+      s->set_colorbar(s, 0);
+      s->set_whitebal(s, 1);
+      s->set_gain_ctrl(s, 1);
+      s->set_exposure_ctrl(s, 1);
+      s->set_hmirror(s, 0);
+      s->set_vflip(s, 0);
+  }
+  
   if (FLASH_LED_ENABLED) {
     init_flash_led();
   }

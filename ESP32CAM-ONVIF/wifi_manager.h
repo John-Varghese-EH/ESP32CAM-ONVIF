@@ -59,7 +59,7 @@ private:
   
   // Stability Tracking
   unsigned long _lastConnectedTime; // Last time we had a valid connection
-  const unsigned long _wifiTimeoutMs = 300000; // 5 minutes timeout for auto-reboot
+  const unsigned long _wifiTimeoutMs = 30000; // 30 seconds timeout for auto-reboot
   
   // Constants
   const char* _credentialsFile = "/wifi_creds.json";
