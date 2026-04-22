@@ -16,7 +16,7 @@ Usage:
     python utils/build_web.py
     python utils/build_web.py --no-minify  # Skip minification
 
-Author: ESP32CAM-ONVIF Project
+Author: John-Varghese-EH ESP32CAM-ONVIF Project
 """
 
 import os
@@ -257,7 +257,7 @@ def main():
     print(f"  GZipped:   {gz_size:,} bytes")
     print(f"  Saved:     {orig - gz_size:,} bytes ({(orig - gz_size) / orig * 100:.1f}%)")
     print(f"{'='*50}")
-    print("\n[OK] Done!\n")
+    print("\n[+] Done!\n")
 
 
 if __name__ == "__main__":

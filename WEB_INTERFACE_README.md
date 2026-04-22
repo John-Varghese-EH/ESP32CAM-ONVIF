@@ -2,7 +2,7 @@
 
 ## 🌟 Overview
 
-A **feature-rich, modern web interface** for controlling and monitoring your ESP32-CAM with ONVIF support. Built with cutting-edge web technologies, this interface provides professional-grade camera control, real-time monitoring, AI-powered object detection, and extensive customization options—all accessible from any browser.
+A **feature-rich, modern web interface** for controlling and monitoring your ESP32-CAM with ONVIF support. Built with cutting-edge web technologies, this interface provides professional-grade camera control, real-time monitoring, AI-powered object detection, and extensive customization options-all accessible from any browser.
 
 ---
 
@@ -44,16 +44,16 @@ A **feature-rich, modern web interface** for controlling and monitoring your ESP
 
 *All filters applied in browser, saved to localStorage*
 
-### 🤖 **AI Object Detection** (NEW!)
-- **TensorFlow.js COCO-SSD** model
-- Detects **80+ object classes**:
-  - People, vehicles (car, truck, bus, motorcycle, bicycle)
-  - Animals (dog, cat, bird, horse, etc.)
-  - Household items (phone, laptop, bottle, cup, etc.)
-- Real-time bounding boxes
-- Confidence scores
-- Zero backend load (runs in browser)
-- Toggle with **D** key
+### 🤖 **AI Object Detection & Cloud Vision** (NEW!)
+- **Local TensorFlow.js COCO-SSD** model:
+  - Detects 80+ object classes (People, Vehicles, Animals, etc.)
+  - Real-time bounding boxes with zero backend load
+  - Toggle with **D** key
+- **Cloud-based Gemini Vision AI**:
+  - Send snapshots directly to Google's Gemini Models
+  - Pre-built modes: "Describe Scene", "Security Threat Mode", "Package Detection"
+  - Supports Custom Prompts & Freeform chat
+  - Privacy-first: Cloud API is completely optional and strictly gated behind user execution.
 
 ### 🎥 **Recording**
 - **Client-side** recording (WebM/MP4)
@@ -374,13 +374,13 @@ A **feature-rich, modern web interface** for controlling and monitoring your ESP
 4. Export compiles to WebM video
 5. Download to device
 
-### **AI Object Detection**
-1. Press `D` to load model (~5MB download, one-time)
-2. Wait for "AI model loaded" toast
-3. Press `D` again to enable detection
-4. Green bounding boxes appear on detected objects
-5. Labels show object class and confidence %
-6. Detects: person, car, dog, phone, laptop, and 75+ more classes
+### **AI Object Detection & Gemini Vision**
+1. **Local Object Detection:** Press `D` to load the TensorFlow model.
+2. Green bounding boxes appear on detected objects (person, car, dog, etc.).
+3. **Advanced Gemini Cloud Analysis:** Navigate to the "AI Vision" tab in the dashboard.
+4. Input your Gemini API Key directly into your browser (stored locally).
+5. Capture a live scene and command Gemini to describe the feed, identify security threats, or detect packages.
+6. Generates deep, contextual AI responses dynamically formatted via markdown.
 
 ### **Comparison Tool**
 1. Capture "Before" snapshot
@@ -532,7 +532,7 @@ Check the main project README for license information.
 - Inter Font - Rasmus Andersson
 - ESP32 Arduino Core
 
-**Developed with ❤️ for the ESP32-CAM community**
+**Developed with ❤️ for the ESP32-CAM community by John Varghese (J0X)**
 
 ---
 

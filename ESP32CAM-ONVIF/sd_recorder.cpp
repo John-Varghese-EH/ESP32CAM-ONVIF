@@ -69,7 +69,6 @@ bool _manualRecording = false; // Flag for manual web trigger
 int _segmentCounter = 0;
 int _framesSinceFlush = 0;  // Track frames for periodic flush
 
-
 void manage_storage() {
     float total = SD_MMC.totalBytes();
     float used = SD_MMC.usedBytes();
@@ -203,16 +202,33 @@ void sd_recorder_loop() {
 
     unsigned long now = millis();
     
+    // 1. Check segment time (only if we are actively recording)
+    if (_isRecording && (now - _currentSegmentStart > (RECORD_SEGMENT_SEC * 1000))) {
+        start_new_segment();
+    }
+    
+    // 2. Init if needed
+    if (!_isRecording) {
+        start_new_segment();
+        if (!_isRecording) return; // Still failed
+    }
+
     // 3. Record Frame (2 FPS for background recording — saves CPU vs 5 FPS)
-    // We queue the frame here, the actual writing happens in sd_write_task without blocking loop()
     if (now - _lastRecordFrame > 500) { // 500ms = 2 FPS
         camera_fb_t * fb = esp_camera_fb_get();
         if (!fb) return;
         
-        // Push to queue, do not block. If full, SD is lagging, drop frame.
-        if (xQueueSend(sd_queue, &fb, 0) != pdTRUE) {
-            // Serial.println("[WARN] SD Queue full, dropping frame to avoid freeze");
-            esp_camera_fb_return(fb);
+        if (_recordFile.write(fb->buf, fb->len) != fb->len) {
+            Serial.println("[ERROR] Write failed. Disk full?");
+            _recordFile.close();
+            _isRecording = false;
+        } else {
+            // Periodic flush every 10 frames to prevent data loss on power loss
+            _framesSinceFlush++;
+            if (_framesSinceFlush >= 10) {
+                _recordFile.flush();
+                _framesSinceFlush = 0;
+            }
         }
         
         _lastRecordFrame = now;

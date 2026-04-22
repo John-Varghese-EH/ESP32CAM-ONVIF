@@ -70,7 +70,11 @@ Transform a sub-$10 ESP32 camera module into a **fully-featured, NVR-compatible,
 | `Low_Prio_Task` | 1 | 2 | 4KB | Motion detection, SD recording, LED, Bluetooth |
 | `MQTT_Task` | 1 | 2 | 4KB | Dynamically spawned/killed based on config |
 
-> **Resource Optimization**: When MQTT, Telegram, or Google Drive are disabled in the WebUI, their background tasks are fully destroyed via `vTaskDelete()`, recovering 100% of their stack memory. The watchdog task monitors `appSettings` flags and re-spawns tasks instantly when re-enabled. This ensures idle integrations consume zero CPU cycles and zero heap.
+### 📶 Wireless Features (Beta)
+- **PRESENCE DETECTION**: Automatically detects if you are Home using your Phone's Bluetooth MAC.
+- **STEALTH MODE**: Turns off all lights if WiFi is lost AND you are not home.
+- **BLUETOOTH AUDIO**: Use a Bluetooth Mic/Headset as a wireless microphone (HFP).
+- **PRIORITY STREAMING**: Smart coexistence ensures WiFi RTSP streaming never stutters, even with Bluetooth on.
 
 > **ONVIF Zero-Heap Optimizations**: Extreme ONVIF server optimization prevents memory fragmentation during aggressive NVR polling. All SOAP XML templates are strictly embedded into Flash (`PROGMEM`), and responses are dynamically built directly into a single static C-style `char` array buffer, eliminating dangerous dynamic `String` allocations entirely.
 
@@ -374,7 +378,28 @@ Contributions are welcome. Please fork the repository, create a feature branch, 
 
 ## Disclaimer
 
-> This project pushes the ESP32 well beyond its intended design envelope. Neither the ESP32 nor its SDK was built for full ONVIF/RTSP compliance. While the firmware is stable under normal conditions, edge cases and resource exhaustion can occur. Use at your own risk in production environments.
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Submit a pull request
+
+**Areas needing help:**
+- Testing on different NVR brands
+- New board definitions
+- Documentation improvements
+
+> [!IMPORTANT]
+> **Attention Forkers:** If you are using a fork of this repository, please **sync with the upstream `main` branch** before reporting bugs. This project is under active development, and many early-stage issues have already been patched.
+> 
+> **Note on Issues:** Please only raise issues or bug reports in the **[Main Upstream Repository](https://github.com/John-Varghese-EH/ESP32CAM-ONVIF/issues)**. I do not receive notifications for issues opened on forks, and they will likely go unnoticed.
+
+---
+
+## ⚠️ Disclaimer
+
+> **This project is currently a proof of concept for testing.**
+> 
+> Neither the ESP32CAM, nor its SDK was meant or built for proper ONVIF/RTSP support. Bugs can occur!
 
 ---
 

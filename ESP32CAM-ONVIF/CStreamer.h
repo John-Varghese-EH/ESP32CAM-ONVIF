@@ -22,6 +22,10 @@ protected:
 
     void    streamFrame(unsigned const char *data, uint32_t dataLen, uint32_t curMsec);
 
+    // Accessible to subclasses for RTP-over-TCP transport
+    bool   m_TCPTransport;
+    SOCKET m_Client;
+
 private:
     int    SendRtpPacket(unsigned const char *jpeg, int jpegLen, int fragmentOffset, BufPtr quant0tbl = NULL, BufPtr quant1tbl = NULL);// returns new fragmentOffset or 0 if finished with frame
 
@@ -36,12 +40,13 @@ private:
     u_short m_SequenceNumber;
     uint32_t m_Timestamp;
     int m_SendIdx;
-    bool m_TCPTransport;
-    SOCKET m_Client;
     uint32_t m_prevMsec;
 
     u_short m_width; // image data info
     u_short m_height;
+
+    // Per-instance RTP send buffer (avoids shared static in hot path)
+    char m_RtpBuf[2048];
 };
 
 

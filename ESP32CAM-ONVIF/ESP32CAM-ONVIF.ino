@@ -148,104 +148,38 @@ void setup() {
   
   Serial.println("[INFO] System Ready.");
   Serial.printf("[INFO] Free Heap: %u bytes | PSRAM: %u bytes\n", ESP.getFreeHeap(), ESP.getFreePsram());
-  
-  // --- Create FreeRTOS Tasks ---
-  xTaskCreatePinnedToCore(rtsp_stream_task, "RTSP_Task", 6144, NULL, 4, &rtspTaskHandle, 0);
-  xTaskCreatePinnedToCore(onvif_http_task, "ONVIF_HTTP_Task", 6144, NULL, 3, &onvifTaskHandle, 1);
-  xTaskCreatePinnedToCore(wifi_mgmt_task, "WiFi_Mgmt_Task", 4096, NULL, 6, &wifiTaskHandle, 1);
-  xTaskCreatePinnedToCore(watchdog_task, "WDT_Task", 2048, NULL, 7, &wdtTaskHandle, 1);
-  xTaskCreatePinnedToCore(low_prio_task, "Low_Prio_Task", 4096, NULL, 2, &lowPrioTaskHandle, 1);
-  
-  // MQTT is spawned dynamically by Watchdog Task to save RAM if disabled
 }
 
 void loop() {
-  // Main loop is now empty. Everything runs in FreeRTOS tasks.
-  vTaskDelay(pdMS_TO_TICKS(1000));
-}
-
-// === FreeRTOS Task Definitions ===
-
-void rtsp_stream_task(void *pvParameters) {
-    esp_task_wdt_add(NULL);
-    while (1) {
-        esp_task_wdt_reset();
-        rtsp_server_loop();   // Highest priority for streaming
-        vTaskDelay(pdMS_TO_TICKS(5)); // Small delay to prevent starving other tasks
-    }
-}
-
-void onvif_http_task(void *pvParameters) {
-    esp_task_wdt_add(NULL);
-    while (1) {
-        esp_task_wdt_reset();
-        web_config_loop();    // Web UI
-        onvif_server_loop();  // Discovery/SOAP
-        vTaskDelay(pdMS_TO_TICKS(20)); // Web tasks can sleep a bit longer
-    }
-}
-
-void wifi_mgmt_task(void *pvParameters) {
-    esp_task_wdt_add(NULL);
-    while (1) {
-        esp_task_wdt_reset();
-        wifiManager.loop();   // Connectivity checks
-        vTaskDelay(pdMS_TO_TICKS(100)); // Run every 100ms
-    }
-}
-
-void watchdog_task(void *pvParameters) {
-    esp_task_wdt_add(NULL);
-    while (1) {
-        esp_task_wdt_reset();
-        
-        // Memory Leak Audit
-        uint32_t free_heap = esp_get_free_heap_size();
-        uint32_t min_free = esp_get_minimum_free_heap_size();
-        
-        if (free_heap < 20480) { // Under 20KB free heap
-            Serial.printf("[CRITICAL] Low Heap Memory! Free: %u. Forcing restart for stability.\n", free_heap);
-            esp_restart();
-        }
-        
-        // Dynamic Task Manager
-        if (appSettings.mqttEnabled && mqttTaskHandle == NULL) {
-            Serial.println("[INFO] Dynamic Task Manager: Spawning MQTT_Task");
-            xTaskCreatePinnedToCore(mqtt_task, "MQTT_Task", 4096, NULL, 2, &mqttTaskHandle, 1);
-        }
-
-        // Stack HWM Logging (Optional, runs once every 30s)
-        static uint32_t last_stack_log = 0;
-        if (millis() - last_stack_log > 30000) {
-            last_stack_log = millis();
-            Serial.printf("[INFO] Free heap: %u | Min free: %u | PSRAM free: %u\n",
-                free_heap, min_free, ESP.getFreePsram());
-            
-            UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
-            Serial.printf("[INFO] WDT_Task HWM: %u bytes\n", hwm * sizeof(StackType_t));
-            
-            if(rtspTaskHandle) { hwm = uxTaskGetStackHighWaterMark(rtspTaskHandle); Serial.printf("[INFO] RTSP_Task HWM: %u bytes\n", hwm * sizeof(StackType_t)); }
-            if(onvifTaskHandle) { hwm = uxTaskGetStackHighWaterMark(onvifTaskHandle); Serial.printf("[INFO] ONVIF_Task HWM: %u bytes\n", hwm * sizeof(StackType_t)); }
-            if(wifiTaskHandle) { hwm = uxTaskGetStackHighWaterMark(wifiTaskHandle); Serial.printf("[INFO] WiFi_Task HWM: %u bytes\n", hwm * sizeof(StackType_t)); }
-            if(mqttTaskHandle) { hwm = uxTaskGetStackHighWaterMark(mqttTaskHandle); Serial.printf("[INFO] MQTT_Task HWM: %u bytes\n", hwm * sizeof(StackType_t)); }
-        }
-        
-        vTaskDelay(pdMS_TO_TICKS(2000)); // Feed every 2s
-    }
-}
-
-void low_prio_task(void *pvParameters) {
-    esp_task_wdt_add(NULL);
-    while (1) {
-        esp_task_wdt_reset();
-        motion_detection_loop();
-        sd_recorder_loop();
-        serial_console_loop();
-        auto_flash_loop();
-        status_led_loop();
-        #ifdef BLUETOOTH_ENABLED
-            btManager.loop();
-        #endif
-        vTaskDelay(pdMS_TO_TICKS(100)); // 100ms cycle
-    }
+  // Feed Watchdog
+  esp_task_wdt_reset();
+  uint32_t now = millis();
+  
+  // === HIGH PRIORITY — every cycle (~0ms target latency) ===
+  rtsp_server_loop();   // Highest priority for streaming
+  web_config_loop();    // Web UI
+  
+  // === MEDIUM PRIORITY — every 100ms ===
+  static uint32_t lastMedium = 0;
+  if (now - lastMedium > 100) {
+      lastMedium = now;
+      wifiManager.loop();   // Connectivity
+      onvif_server_loop();  // Discovery/SOAP
+  }
+  
+  // === LOW PRIORITY — every 500ms ===
+  static uint32_t lastLow = 0;
+  if (now - lastLow > 500) {
+      lastLow = now;
+      motion_detection_loop();
+      sd_recorder_loop();
+      serial_console_loop();
+      auto_flash_loop();
+      status_led_loop();
+      #ifdef BLUETOOTH_ENABLED
+        btManager.loop();
+      #endif
+  }
+  
+  yield();
 }

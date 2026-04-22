@@ -37,16 +37,26 @@ void auto_flash_loop() {
     int exposure = s->status.aec_value; 
     int gain = s->status.agc_gain;
     
-    bool is_dark = (exposure > 600) || (gain > 30);
-    
+    // Hysteresis to prevent rapid flickering near threshold
+    // Turn ON when very dark, turn OFF only when significantly brighter
     static bool is_led_on = false;
+    bool is_dark;
+    if (is_led_on) {
+        // LED is on — require significantly brighter to turn OFF (lower thresholds)
+        is_dark = (exposure > 400) || (gain > 20);
+    } else {
+        // LED is off — require significantly darker to turn ON (higher thresholds)
+        is_dark = (exposure > 700) || (gain > 35);
+    }
     
     if (is_dark && !is_led_on) {
         set_flash_led(true);
         is_led_on = true;
+        Serial.println(F("[INFO] Auto-flash ON (low light)"));
     } else if (!is_dark && is_led_on) {
         set_flash_led(false);
         is_led_on = false;
+        Serial.println(F("[INFO] Auto-flash OFF (bright)"));
     }
 }
 

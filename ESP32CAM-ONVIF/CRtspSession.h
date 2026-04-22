@@ -15,9 +15,7 @@ enum RTSP_CMD_TYPES
     RTSP_UNKNOWN
 };
 
-// Buffer sizes — tuned for ESP32 SRAM constraints.
-// RTSP requests are typically <500 bytes; 2KB is generous.
-#define RTSP_BUFFER_SIZE       2048
+#define RTSP_BUFFER_SIZE       2048    // for incoming requests, and outgoing responses (reduced from 10000 to save SRAM)
 #define RTSP_PARAM_STRING_MAX  200
 #define MAX_HOSTNAME_LEN       256
 
@@ -58,12 +56,15 @@ private:
 
     // Session state
     int m_RtspSessionID;
-    SOCKET m_RtspClient;                                      // RTSP socket (WiFiClient*)
-    int m_StreamID;                                           // stream index
-    IPPORT m_ClientRTPPort;                                   // client RTP port (UDP)
-    IPPORT m_ClientRTCPPort;                                  // client RTCP port (UDP)
-    bool m_TcpTransport;                                      // true = RTP-over-TCP
-    CStreamer * m_Streamer;                                    // media streamer
+    SOCKET m_RtspClient;                                      // RTSP socket of that session
+    int m_StreamID;                                           // number of simulated stream of that session
+    IPPORT m_ClientRTPPort;                                  // client port for UDP based RTP transport
+    IPPORT m_ClientRTCPPort;                                 // client port for UDP based RTCP transport
+    bool m_TcpTransport;                                      // if Tcp based streaming was activated
+    CStreamer    * m_Streamer;                                // the UDP or TCP streamer of that session
+
+
+    // parameters of the last received RTSP request
 
     // Last parsed RTSP request fields
     RTSP_CMD_TYPES m_RtspCmdType;
