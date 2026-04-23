@@ -40,41 +40,6 @@ Transform your affordable ESP32 camera module into a **professional-grade ONVIF 
 
 ---
 
-## 🏗️ Architecture
-
-```
-                                    +------------------+
-                                    |   NVR / DVR      |
-                                    |  (Hikvision,     |
-        +-------+     RTSP/554      |   Dahua, etc.)   |
-        | ESP32 | ===============> +------------------+
-        |  CAM  |
-        |       | ---> ONVIF/8000 ---> WS-Discovery/3702 (Auto-detect)
-        |       |
-        |       | ---> HTTP/80 -----> WebUI (Dashboard, Camera, Settings)
-        |       |                         |
-        |       |                         +---> /stream (MJPEG live feed)
-        |       |                         +---> /api/settings (REST API)
-        |       |                         +---> /webdav/* (Network Drive)
-        |       |
-        |       | ---> Motion Event ---> Telegram (Async Photo)
-        |       |                   ---> Google Drive (Async JPEG Upload)
-        |       |                   ---> MQTT (State Publish)
-        |       |                   ---> SD Card (Continuous .mjpeg)
-        +-------+
-```
-
-**FreeRTOS Task Layout** (6 pinned tasks for deterministic scheduling):
-
-| Task | Core | Priority | Stack | Purpose |
-|------|------|----------|-------|---------|
-| `RTSP_Task` | 0 | 4 (High) | 6KB | Real-time video streaming (never blocked) |
-| `ONVIF_HTTP_Task` | 1 | 3 | 6KB | Web UI + ONVIF SOAP processing |
-| `WiFi_Mgmt_Task` | 1 | 6 | 4KB | Connectivity monitoring and reconnection |
-| `WDT_Task` | 1 | 7 (Critical) | 2KB | Watchdog, heap audit, dynamic task spawner |
-| `Low_Prio_Task` | 1 | 2 | 4KB | Motion detection, SD recording, LED, Bluetooth |
-| `MQTT_Task` | 1 | 2 | 4KB | Dynamically spawned/killed based on config |
-
 ### 🎥 Professional Streaming
 | Feature | ESP32-CAM | ESP32-S3 | ESP32-P4 |
 |---------|-----------|----------|----------|
@@ -523,6 +488,43 @@ The web interface is a responsive single-page application with a dark cyberpunk 
 | 554 | RTSP | Real-time video streaming |
 | 8000 | ONVIF | Device management and discovery |
 | 3702 | WS-Discovery | UDP Multicast auto-detection |
+
+---
+
+## 🏗️ Architecture
+
+```
+                                    +------------------+
+                                    |   NVR / HVR      |
+                                    |  (Hikvision,     |
+        +-------+     RTSP/554      |   Dahua, etc.)   |
+        | ESP32 | ===============> +------------------+
+        |  CAM  |
+        |       | ---> ONVIF/8000 ---> WS-Discovery/3702 (Auto-detect)
+        |       |
+        |       | ---> HTTP/80 -----> WebUI (Dashboard, Camera, Settings)
+        |       |                         |
+        |       |                         +---> /stream (MJPEG live feed)
+        |       |                         +---> /api/settings (REST API)
+        |       |                         +---> /webdav/* (Network Drive)
+        |       |
+        |       | ---> Motion Event ---> Telegram (Async Photo)
+        |       |                   ---> Google Drive (Async JPEG Upload)
+        |       |                   ---> MQTT (State Publish)
+        |       | ---> more:        ---> SD Card (Continuous .mjpeg)
+        +-------+
+```
+
+**FreeRTOS Task Layout** (6 pinned tasks for deterministic scheduling):
+
+| Task | Core | Priority | Stack | Purpose |
+|------|------|----------|-------|---------|
+| `RTSP_Task` | 0 | 4 (High) | 6KB | Real-time video streaming (never blocked) |
+| `ONVIF_HTTP_Task` | 1 | 3 | 6KB | Web UI + ONVIF SOAP processing |
+| `WiFi_Mgmt_Task` | 1 | 6 | 4KB | Connectivity monitoring and reconnection |
+| `WDT_Task` | 1 | 7 (Critical) | 2KB | Watchdog, heap audit, dynamic task spawner |
+| `Low_Prio_Task` | 1 | 2 | 4KB | Motion detection, SD recording, LED, Bluetooth |
+| `MQTT_Task` | 1 | 2 | 4KB | Dynamically spawned/killed based on config |
 
 ---
 
