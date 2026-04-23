@@ -4,7 +4,7 @@
 
 [![Platform](https://img.shields.io/badge/platform-ESP32%20|%20ESP32--S3%20|%20ESP32--P4-blue.svg)](https://www.espressif.com/en/products/socs/esp32)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-Active%20Development-brightgreen.svg)]()
+[![Status](https://img.shields.io/badge/status-Beta-blue.svg)]()
 [![H.264](https://img.shields.io/badge/H.264-ESP32--P4%20|%20S3-orange.svg)]()
 
 ![ESP32-CAM-ONVIF](ESP32-CAM-ONVIF.jpg)
@@ -39,41 +39,6 @@ Transform your affordable ESP32 camera module into a **professional-grade ONVIF 
 > *Star the repo and join the project!*
 
 ---
-
-## 🏗️ Architecture
-
-```
-                                    +------------------+
-                                    |   NVR / DVR      |
-                                    |  (Hikvision,     |
-        +-------+     RTSP/554      |   Dahua, etc.)   |
-        | ESP32 | ===============> +------------------+
-        |  CAM  |
-        |       | ---> ONVIF/8000 ---> WS-Discovery/3702 (Auto-detect)
-        |       |
-        |       | ---> HTTP/80 -----> WebUI (Dashboard, Camera, Settings)
-        |       |                         |
-        |       |                         +---> /stream (MJPEG live feed)
-        |       |                         +---> /api/settings (REST API)
-        |       |                         +---> /webdav/* (Network Drive)
-        |       |
-        |       | ---> Motion Event ---> Telegram (Async Photo)
-        |       |                   ---> Google Drive (Async JPEG Upload)
-        |       |                   ---> MQTT (State Publish)
-        |       |                   ---> SD Card (Continuous .mjpeg)
-        +-------+
-```
-
-**FreeRTOS Task Layout** (6 pinned tasks for deterministic scheduling):
-
-| Task | Core | Priority | Stack | Purpose |
-|------|------|----------|-------|---------|
-| `RTSP_Task` | 0 | 4 (High) | 6KB | Real-time video streaming (never blocked) |
-| `ONVIF_HTTP_Task` | 1 | 3 | 6KB | Web UI + ONVIF SOAP processing |
-| `WiFi_Mgmt_Task` | 1 | 6 | 4KB | Connectivity monitoring and reconnection |
-| `WDT_Task` | 1 | 7 (Critical) | 2KB | Watchdog, heap audit, dynamic task spawner |
-| `Low_Prio_Task` | 1 | 2 | 4KB | Motion detection, SD recording, LED, Bluetooth |
-| `MQTT_Task` | 1 | 2 | 4KB | Dynamically spawned/killed based on config |
 
 ### 🎥 Professional Streaming
 | Feature | ESP32-CAM | ESP32-S3 | ESP32-P4 |
@@ -526,6 +491,43 @@ The web interface is a responsive single-page application with a dark cyberpunk 
 
 ---
 
+## 🏗️ Architecture
+
+```
+                                    +------------------+
+                                    |   NVR / HVR      |
+                                    |  (Hikvision,     |
+        +-------+     RTSP/554      |   Dahua, etc.)   |
+        | ESP32 | ===============> +------------------+
+        |  CAM  |
+        |       | ---> ONVIF/8000 ---> WS-Discovery/3702 (Auto-detect)
+        |       |
+        |       | ---> HTTP/80 -----> WebUI (Dashboard, Camera, Settings)
+        |       |                         |
+        |       |                         +---> /stream (MJPEG live feed)
+        |       |                         +---> /api/settings (REST API)
+        |       |                         +---> /webdav/* (Network Drive)
+        |       |
+        |       | ---> Motion Event ---> Telegram (Async Photo)
+        |       |                   ---> Google Drive (Async JPEG Upload)
+        |       |                   ---> MQTT (State Publish)
+        |       | ---> more:        ---> SD Card (Continuous .mjpeg)
+        +-------+
+```
+
+**FreeRTOS Task Layout** (6 pinned tasks for deterministic scheduling):
+
+| Task | Core | Priority | Stack | Purpose |
+|------|------|----------|-------|---------|
+| `RTSP_Task` | 0 | 4 (High) | 6KB | Real-time video streaming (never blocked) |
+| `ONVIF_HTTP_Task` | 1 | 3 | 6KB | Web UI + ONVIF SOAP processing |
+| `WiFi_Mgmt_Task` | 1 | 6 | 4KB | Connectivity monitoring and reconnection |
+| `WDT_Task` | 1 | 7 (Critical) | 2KB | Watchdog, heap audit, dynamic task spawner |
+| `Low_Prio_Task` | 1 | 2 | 4KB | Motion detection, SD recording, LED, Bluetooth |
+| `MQTT_Task` | 1 | 2 | 4KB | Dynamically spawned/killed based on config |
+
+---
+
 ## 📁 Project Structure
 
 ```
@@ -618,11 +620,6 @@ Contributions are welcome! Please:
 1. Fork the repository
 2. Create a feature branch
 3. Submit a pull request
-
-**Areas needing help:**
-- Testing on different NVR brands
-- New board definitions
-- Documentation improvements
 
 > [!IMPORTANT]
 > **Attention Forkers:** If you are using a fork of this repository, please **sync with the upstream `main` branch** before reporting bugs. This project is under active development, and many early-stage issues have already been patched.
