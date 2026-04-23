@@ -478,6 +478,8 @@ The web interface is a responsive single-page application with a dark cyberpunk 
 - Settings export/import (JSON backup)
 - Factory reset and reboot controls
 
+Check [WEB_INTERFACE_README.md](WEB_INTERFACE_README.md) for more about Web-Server
+
 ---
 
 ## 🔌 Port Configuration
