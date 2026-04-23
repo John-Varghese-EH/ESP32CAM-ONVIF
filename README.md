@@ -1,6 +1,6 @@
 # ESP32-CAM ONVIF/RTSP Surveillance System
 
-### Enterprise-Grade IP Camera Firmware for ESP32
+### Multi-Board, Multi-Codec, Professional Network Camera Firmware
 
 [![Platform](https://img.shields.io/badge/platform-ESP32%20|%20ESP32--S3%20|%20ESP32--P4-blue.svg)](https://www.espressif.com/en/products/socs/esp32)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -9,11 +9,11 @@
 
 ![ESP32-CAM-ONVIF](ESP32-CAM-ONVIF.jpg)
 
-Transform a sub-$10 ESP32 camera module into a **fully-featured, NVR-compatible, cloud-connected security camera**. This firmware delivers real-time RTSP/ONVIF streaming with AI-powered motion detection, automated cloud backups to Google Drive and Telegram, continuous DashCam recording, WebDAV file access, MQTT home automation integration, Bluetooth presence detection, and a modern web interface -- all running on a microcontroller with aggressive memory optimization and FreeRTOS task scheduling.
+Transform your affordable ESP32 camera module into a **professional-grade ONVIF Security Camera**. This firmware delivers real-time RTSP/ONVIF streaming with AI-powered motion detection, **multiple ESP32 camera boards** from various manufacturers and offers **MJPEG** streaming on all boards plus optional **H.264 encoding** on ESP32-P4 (hardware) and ESP32-S3 (software), automated cloud backups to Google Drive and Telegram, continuous recording, WebDAV file access, MQTT home automation integration, Bluetooth presence detection, and a modern web interface -- all running on a microcontroller with aggressive memory optimization and FreeRTOS task scheduling.
 
 ---
 
-## Key Capabilities
+## 🎯 Key Capabilities
 
 | Category | Feature | Details |
 |----------|---------|---------|
@@ -33,15 +33,20 @@ Transform a sub-$10 ESP32 camera module into a **fully-featured, NVR-compatible,
 | **System** | NTP Time Sync | POSIX timezone support for accurate recording timestamps |
 | **UI** | Modern Web Interface | Responsive SPA with dark theme, live dashboard, camera controls, system diagnostics |
 
+> [!NOTE]
+> **🚧 Work in Progress:**  
+> ESP32CAM-ONVIF is still evolving! Help make it better and faster-contributions, feedback, and ideas are warmly welcome.  
+> *Star the repo and join the project!*
+
 ---
 
-## Architecture
+## 🏗️ Architecture
 
 ```
                                     +------------------+
                                     |   NVR / DVR      |
                                     |  (Hikvision,     |
-        +-------+     RTSP/554     |   Dahua, etc.)   |
+        +-------+     RTSP/554      |   Dahua, etc.)   |
         | ESP32 | ===============> +------------------+
         |  CAM  |
         |       | ---> ONVIF/8000 ---> WS-Discovery/3702 (Auto-detect)
@@ -70,6 +75,22 @@ Transform a sub-$10 ESP32 camera module into a **fully-featured, NVR-compatible,
 | `Low_Prio_Task` | 1 | 2 | 4KB | Motion detection, SD recording, LED, Bluetooth |
 | `MQTT_Task` | 1 | 2 | 4KB | Dynamically spawned/killed based on config |
 
+### 🎥 Professional Streaming
+| Feature | ESP32-CAM | ESP32-S3 | ESP32-P4 |
+|---------|-----------|----------|----------|
+| **MJPEG Streaming** | ✅ 20 FPS | ✅ 25+ FPS | ✅ 30+ FPS |
+| **H.264 Encoding** | ❌ | ✅ Software (~17 FPS) | ✅ Hardware (30 FPS @ 1080p) |
+| **ONVIF Compatible** | ✅ | ✅ | ✅ |
+| **Memory Required** | 4MB Flash | 8MB Flash + PSRAM | 8MB Flash + PSRAM |
+
+### 📺 NVR/DVR Compatibility
+- **Hikvision** - HVR/NVR Series (Tested: DS-7200)
+- **Dahua** - XVR/NVR Series  
+- **Ubiquiti Unifi Protect** - UDM Pro, Cloud Key Gen2+
+- **Blue Iris** - PC-based NVR
+- **Synology Surveillance Station**
+- **Any ONVIF Profile S compliant recorder**
+
 ### 📶 Wireless Features (Beta)
 - **PRESENCE DETECTION**: Automatically detects if you are Home using your Phone's Bluetooth MAC.
 - **STEALTH MODE**: Turns off all lights if WiFi is lost AND you are not home.
@@ -80,19 +101,19 @@ Transform a sub-$10 ESP32 camera module into a **fully-featured, NVR-compatible,
 
 ---
 
-## Supported Hardware
+## 📟 Supported Hardware
 
 ### ESP32 (MJPEG Streaming)
-| Board | Manufacturer | Camera | Price |
+| Board | Manufacturer | Camera | Notes |
 |-------|-------------|--------|-------|
-| **ESP32-CAM** | AI-Thinker | OV2640 | ~$5 |
-| **M5Stack Camera** | M5Stack | OV2640 | ~$12 |
-| **M5Stack Wide** | M5Stack | OV2640 (Fisheye) | ~$14 |
-| **M5Stack UnitCam** | M5Stack | OV2640 | ~$8 |
-| **TTGO T-Camera** | LilyGO | OV2640 + OLED | ~$15 |
-| **TTGO T-Journal** | LilyGO | OV2640 + Mic + OLED | ~$18 |
-| **ESP-WROVER-KIT** | Espressif | OV2640 | ~$30 |
-| **ESP-EYE** | Espressif | OV2640 + Mic | ~$20 |
+| **ESP32-CAM** | AI-Thinker | OV2640 | Most common |
+| **M5Stack Camera** | M5Stack | OV2640 | Compact form factor |
+| **M5Stack Wide** | M5Stack | OV2640 | Fisheye lens |
+| **M5Stack UnitCam** | M5Stack | OV2640 | Tiny, no PSRAM |
+| **TTGO T-Camera** | LilyGO | OV2640 | With OLED display |
+| **TTGO T-Journal** | LilyGO | OV2640 | With mic & OLED |
+| **ESP-WROVER-KIT** | Espressif | OV2640 | Dev board |
+| **ESP-EYE** | Espressif | OV2640 | With mic |
 
 ### ESP32-S3 (MJPEG + H.264 Software)
 | Board | Manufacturer | Camera | Notes |
@@ -108,44 +129,99 @@ Transform a sub-$10 ESP32 camera module into a **fully-featured, NVR-compatible,
 
 ---
 
-## Quick Start
+## 🛠️ Quick Start
 
-### 1. Clone and Configure
-
+### 1. Clone Repository
 ```bash
 git clone https://github.com/John-Varghese-EH/ESP32CAM-ONVIF.git
 cd ESP32CAM-ONVIF
 ```
 
+### 2. Select Your Board
 Edit `ESP32CAM-ONVIF/config.h`:
-
 ```cpp
-// ==== SELECT YOUR BOARD ====
-#define BOARD_AI_THINKER_ESP32CAM     // Most common ($5 board)
+// ==== STEP 1: SELECT YOUR BOARD ====
+#define BOARD_AI_THINKER_ESP32CAM     // Most common
+// #define BOARD_FREENOVE_ESP32S3     // For S3 boards
+// #define BOARD_ESP32P4_FUNCTION_EV  // For P4 boards
+```
 
-// ==== SELECT VIDEO CODEC ====
-#define VIDEO_CODEC_MJPEG             // Works on ALL boards
+### 3. Select Video Codec
+```cpp
+// ==== STEP 2: SELECT VIDEO CODEC ====
+#define VIDEO_CODEC_MJPEG             // Works on ALL boards (default)
+// #define VIDEO_CODEC_H264           // ESP32-P4/S3 only!
+```
 
-// ==== WiFi ====
+### 4. Configure WiFi
+```cpp
+// ==== WiFi Settings ====
 #define WIFI_SSID       "YOUR_WIFI_SSID"
 #define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
 ```
 
-### 2. Build and Flash (PlatformIO)
+### 5. Build & Upload
 
+**Arduino IDE:**
+1. Install ESP32 Board Manager (v2.0.14+)
+2. Select your board (AI Thinker ESP32-CAM, etc.)
+3. Upload!
+
+**PlatformIO (Recommended):**
 ```bash
 pio run -t upload
-pio run -t uploadfs        # Upload WebUI to SPIFFS
 pio device monitor -b 115200
 ```
 
-### 3. Access the Web Interface
+**ESP-IDF (Required for H.264):**
+```bash
+idf.py set-target esp32s3  # or esp32p4
+idf.py add-dependency "espressif/esp_h264^1.2.0"  # For H.264
+idf.py build flash monitor
+```
+
+### 6. Access the Web Interface
 
 Open `http://<ESP32-IP>` in your browser. The dashboard provides live streaming, camera controls, system diagnostics, and full integration configuration.
 
 ---
 
-## NVR/DVR Integration
+## 🎬 H.264 Encoding Setup
+
+> **Note**: H.264 requires ESP-IDF, not Arduino IDE.
+
+### ESP32-P4 (Hardware Encoder)
+```cpp
+#define BOARD_ESP32P4_FUNCTION_EV
+#define VIDEO_CODEC_H264
+#define H264_ENCODER_AUTO   // Hardware encoder
+#define H264_GOP       30   // Keyframe interval
+#define H264_FPS       30   // 30 FPS at 1080p
+#define H264_BITRATE   4000000  // 4 Mbps
+```
+
+**Performance**: 30 FPS @ 1920x1080, only 140KB RAM!
+
+### ESP32-S3 (Software Encoder)
+```cpp
+#define BOARD_FREENOVE_ESP32S3
+#define VIDEO_CODEC_H264
+#define H264_ENCODER_AUTO   // Software encoder
+#define H264_SW_MAX_WIDTH   640
+#define H264_SW_MAX_HEIGHT  480
+```
+
+**Performance**: ~17 FPS @ 320x192, requires ~1MB RAM
+
+```bash
+idf.py set-target esp32s3
+idf.py add-dependency "espressif/esp_h264^1.2.0"
+idf.py build flash monitor
+```
+
+---
+
+## 📹 NVR/HVR Integration
 
 ### Hikvision HVR/NVR
 
@@ -158,13 +234,11 @@ Open `http://<ESP32-IP>` in your browser. The dashboard provides live streaming,
 | **Password** | esp123 |
 | **Transfer Protocol** | TCP (recommended) |
 
-### Compatible Systems
-- **Hikvision** HVR/NVR (DS-7200 Series tested)
-- **Dahua** XVR/NVR Series
-- **Ubiquiti Unifi Protect** (UDM Pro, Cloud Key Gen2+)
-- **Blue Iris** (PC-based NVR)
-- **Synology Surveillance Station**
-- **Any ONVIF Profile S compliant recorder**
+### Troubleshooting "Offline (Parameter Error)"
+- ✅ Ensure time is synced (NVR sends SetSystemDateAndTime)
+- ✅ Use TCP transport (more reliable than UDP)
+- ✅ Try rebooting both camera and NVR
+- ✅ For H.264: Ensure codec is correctly configured
 
 ### Hikvision HVR Workaround (go2rtc Transcoder)
 
@@ -172,15 +246,16 @@ Open `http://<ESP32-IP>` in your browser. The dashboard provides live streaming,
 > Use **go2rtc** for real-time transcoding and **onvif-server** for protocol wrapping.
 
 ```
-ESP32-CAM (MJPEG) --> go2rtc (transcode to H.264) --> onvif-server --> Hikvision NVR
-   Port 554              Port 8554                      Port 8081
+ESP32-CAM (MJPEG) → go2rtc (transcode to H.264) → onvif-server → Hikvision NVR
+      ↓                         ↓                      ↓
+   Port 554              H.264 @ Port 8554         Port 8081
 ```
 
 See the [go2rtc setup guide](https://github.com/AlexxIT/go2rtc) and [onvif-server](https://github.com/daniela-hase/onvif-server) for full configuration instructions.
 
 ---
 
-## Cloud Backup: Google Drive
+## ☁️ Cloud Backup: Google Drive
 
 Motion-triggered JPEG snapshots are uploaded asynchronously to Google Drive using a Google Apps Script proxy. This approach avoids heavy OAuth flows on the microcontroller and uses PSRAM-buffered transfers to prevent blocking the RTSP stream.
 
@@ -218,38 +293,7 @@ function doPost(e) {
 
 ---
 
-## H.264 Encoding
-
-> H.264 requires ESP-IDF (not Arduino IDE).
-
-### ESP32-P4 (Hardware Encoder)
-```cpp
-#define BOARD_ESP32P4_FUNCTION_EV
-#define VIDEO_CODEC_H264
-#define H264_ENCODER_AUTO   // Hardware encoder
-#define H264_GOP       30   // Keyframe interval
-#define H264_FPS       30   // 30 FPS at 1080p
-#define H264_BITRATE   4000000  // 4 Mbps
-```
-
-### ESP32-S3 (Software Encoder)
-```cpp
-#define BOARD_FREENOVE_ESP32S3
-#define VIDEO_CODEC_H264
-#define H264_ENCODER_AUTO   // Software encoder
-#define H264_SW_MAX_WIDTH   640
-#define H264_SW_MAX_HEIGHT  480
-```
-
-```bash
-idf.py set-target esp32s3
-idf.py add-dependency "espressif/esp_h264^1.2.0"
-idf.py build flash monitor
-```
-
----
-
-## WebUI Feature Overview
+## 🌐 WebUI Feature Overview
 
 The web interface is a responsive single-page application with a dark cyberpunk theme.
 
@@ -277,7 +321,7 @@ The web interface is a responsive single-page application with a dark cyberpunk 
 
 ---
 
-## Port Configuration
+## 🔌 Port Configuration
 
 | Port | Service | Description |
 |------|---------|-------------|
@@ -288,7 +332,7 @@ The web interface is a responsive single-page application with a dark cyberpunk 
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 ESP32CAM-ONVIF/
@@ -319,25 +363,27 @@ ESP32CAM-ONVIF/
 
 ---
 
-## Troubleshooting
+## ⚠️ Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| Purple/green lines in stream | Power supply issue. Use a 5V 2A adapter |
-| Stream disconnects frequently | Weak WiFi signal. Move closer or use an external antenna |
-| ONVIF not discovered by NVR | Enable multicast on your router. Allow UDP port 3702 |
-| "Parameter error" on Hikvision | Verify ONVIF port 8000, credentials admin/esp123, use TCP |
-| Unifi Protect auth failure | Fixed in v1.1+. Update firmware |
-| Bootloop on startup | GPIO conflict. Set `FLASH_LED_ENABLED` and `STATUS_LED_ENABLED` to `false` in config.h |
-| H.264 compile error | Requires ESP-IDF with `esp_h264` component (not Arduino IDE) |
-| Low memory crashes | Disable unused integrations (MQTT, Telegram, Google Drive) in WebUI to recover RAM |
-| SD card mount failure | Use 1-bit SD mode when Flash LED is enabled (set in config.h) |
+| **Purple/Green lines** | Power supply issue - use 5V 2A adapter |
+| **Stream disconnects** | Weak WiFi - move closer or use external antenna |
+| **"Drop the Loop"** | Memory issue - reduce resolution or disable features |
+| **ONVIF not discovered** | Enable multicast on router, allow UDP 3702 |
+| **H.264 compile error** | You need ESP-IDF + esp_h264 component |
+| **H.264 not supported** | Only ESP32-P4 (HW) and ESP32-S3 (SW) support H.264 |
+| **Hikvision: "Stream type not supported"** | ESP32-CAM outputs MJPEG but Hikvision needs H.264. Use [go2rtc transcoder](#-hikvision-hvr-workaround-go2rtc-transcoder) |
+| **Hikvision: "Parameter error"** | Check ONVIF port (8000), user/pass (admin/esp123), use TCP transport |
+| **Unifi Protect: Auth failed** | Fixed in v1.1+ - update firmware |
+| **Stack smashing / random crashes** | Fixed in v1.1+ - update firmware |
+| **Bootloop on startup** | LED/PTZ pins may conflict with board. Set `FLASH_LED_ENABLED` and `STATUS_LED_ENABLED` to `false` in config.h |
 
 ---
 
-## Roadmap
+## 🗺️ Roadmap
 
-### Completed
+### ✅ Completed
 - [x] Multi-board support (12+ boards)
 - [x] ONVIF Profile S compliance
 - [x] Hikvision, Dahua, Unifi Protect compatibility
@@ -351,11 +397,11 @@ ESP32CAM-ONVIF/
 - [x] Bluetooth presence detection and stealth mode
 - [x] OTA updates (manual + GitHub auto-update)
 
-### In Progress
+### 🔄 In Progress
 - [ ] H.264 RTP NAL unit packetization
 - [ ] ONVIF H.264 profile reporting
 
-### Planned
+### 📋 Planned
 - [ ] H.265/HEVC support (ESP32-P4)
 - [ ] Audio support (G.711/AAC)
 - [ ] ONVIF Profile T (Advanced streaming)
@@ -364,7 +410,7 @@ ESP32CAM-ONVIF/
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
 Contributions are welcome. Please fork the repository, create a feature branch, and submit a pull request.
 
@@ -373,10 +419,6 @@ Contributions are welcome. Please fork the repository, create a feature branch, 
 - New board definitions and pin configurations
 - Performance profiling and memory optimization
 - Documentation and translations
-
----
-
-## Disclaimer
 
 Contributions are welcome! Please:
 1. Fork the repository
@@ -403,7 +445,7 @@ Contributions are welcome! Please:
 
 ---
 
-## License
+## 📜 License
 
 Apache License 2.0 - See [LICENSE](LICENSE) for details.
 
@@ -420,9 +462,9 @@ Built on:
 
 ---
 
-## Support the Project
+## 💗 Support the Project
 
-This is an active, evolving project. If it helped you, consider supporting continued development:
+This is an active, evolving project. If it helped you, consider supporting continued development ☺️:
 
 [![Buy me a Coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/CyberTrinity)
 [![Patreon](https://img.shields.io/badge/Patreon-F96854?style=for-the-badge&logo=patreon&logoColor=white)](https://patreon.com/CyberTrinity)
@@ -432,7 +474,7 @@ This is an active, evolving project. If it helped you, consider supporting conti
 
 <div align="center">
 
-**Star this repo if it helped you.**
+**⭐ Star this repo if it helped you.**
 
 [Report Bug](https://github.com/John-Varghese-EH/ESP32CAM-ONVIF/issues) | [Request Feature](https://github.com/John-Varghese-EH/ESP32CAM-ONVIF/issues)
 
