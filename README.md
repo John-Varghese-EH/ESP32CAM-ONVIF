@@ -4,7 +4,7 @@
 
 [![Platform](https://img.shields.io/badge/platform-ESP32%20|%20ESP32--S3%20|%20ESP32--P4-blue.svg)](https://www.espressif.com/en/products/socs/esp32)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-Active%20Development-brightgreen.svg)]()
+[![Status](https://img.shields.io/badge/status-Beta-brightblue.svg)]()
 [![H.264](https://img.shields.io/badge/H.264-ESP32--P4%20|%20S3-orange.svg)]()
 
 ![ESP32-CAM-ONVIF](ESP32-CAM-ONVIF.jpg)
@@ -620,11 +620,6 @@ Contributions are welcome! Please:
 1. Fork the repository
 2. Create a feature branch
 3. Submit a pull request
-
-**Areas needing help:**
-- Testing on different NVR brands
-- New board definitions
-- Documentation improvements
 
 > [!IMPORTANT]
 > **Attention Forkers:** If you are using a fork of this repository, please **sync with the upstream `main` branch** before reporting bugs. This project is under active development, and many early-stage issues have already been patched.
