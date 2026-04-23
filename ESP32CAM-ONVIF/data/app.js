@@ -45,7 +45,21 @@ function showToast(msg, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `toast-item toast-${type}`;
     const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
-    toast.innerHTML = `<span style="font-size:1.1rem;min-width:16px;text-align:center">${icons[type] || icons.info}</span><span style="flex:1">${msg}</span><div class="toast-progress"></div>`;
+    
+    const iconSpan = document.createElement('span');
+    iconSpan.style.cssText = 'font-size:1.1rem;min-width:16px;text-align:center';
+    iconSpan.textContent = icons[type] || icons.info;
+    
+    const textSpan = document.createElement('span');
+    textSpan.style.flex = '1';
+    textSpan.textContent = msg;
+    
+    const progressDiv = document.createElement('div');
+    progressDiv.className = 'toast-progress';
+    
+    toast.appendChild(iconSpan);
+    toast.appendChild(textSpan);
+    toast.appendChild(progressDiv);
     container.appendChild(toast);
     // Auto-remove after 3.2s
     setTimeout(() => {

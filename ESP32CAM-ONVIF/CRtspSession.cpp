@@ -26,10 +26,11 @@ CRtspSession::CRtspSession(SOCKET aRtspClient, CStreamer * aStreamer)
 
 CRtspSession::~CRtspSession()
 {
-    // closesocket() handles both stop() and delete of the WiFiClient.
-    // SOCKET is typedef'd to WiFiClient* (see platglue-esp32.h).
-    closesocket(m_RtspClient);
-    m_RtspClient = nullptr;
+    if (m_RtspClient) {
+        m_RtspClient->stop();
+        delete m_RtspClient;
+        m_RtspClient = nullptr;
+    }
 };
 
 void CRtspSession::Init()

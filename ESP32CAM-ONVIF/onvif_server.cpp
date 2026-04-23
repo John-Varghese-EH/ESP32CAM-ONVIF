@@ -19,7 +19,8 @@ WiFiUDP onvifUDP;
 static bool _onvifEnabled = DEFAULT_ONVIF_ENABLED;
 
 // Shared SOAP response buffer - single-threaded, saves 2KB vs separate static buffers.
-static char s_soapBuf[2048];
+static char *s_soapBuf = nullptr;
+const size_t SOAP_BUF_SIZE = 4096;
 
 bool onvif_is_enabled() { return _onvifEnabled; }
 void onvif_set_enabled(bool en) { _onvifEnabled = en; }
@@ -523,18 +524,20 @@ void send_soap_fault(WebServer &server, const char *code, const char *subcode,
 // Optimized send for dynamic content (Static Buffer = No Heap Frag)
 void sendDynamicPROGMEM(WebServer &server, const char *tpl, const char *ip,
                         int port) {
+  if (!s_soapBuf) return;
   // Reuse shared buffer (single-threaded, no OOM risk)
-  snprintf_P(s_soapBuf, sizeof(s_soapBuf), PART_HEADER);
+  snprintf_P(s_soapBuf, SOAP_BUF_SIZE, PART_HEADER);
   size_t len = strlen(s_soapBuf);
-  snprintf_P(s_soapBuf + len, sizeof(s_soapBuf) - len, tpl, ip, port);
+  snprintf_P(s_soapBuf + len, SOAP_BUF_SIZE - len, tpl, ip, port);
   server.send(200, "application/soap+xml", s_soapBuf);
 }
 
 // Overload for just sending fixed PROGMEM with header
 void sendFixedPROGMEM(WebServer &server, const char *tpl) {
+  if (!s_soapBuf) return;
   // Reuse shared buffer (single-threaded)
-  snprintf_P(s_soapBuf, sizeof(s_soapBuf), PART_HEADER);
-  strncat_P(s_soapBuf, tpl, sizeof(s_soapBuf) - strlen(s_soapBuf) - 1);
+  snprintf_P(s_soapBuf, SOAP_BUF_SIZE, PART_HEADER);
+  strncat_P(s_soapBuf, tpl, SOAP_BUF_SIZE - strlen(s_soapBuf) - 1);
   server.send(200, "application/soap+xml", s_soapBuf);
 }
 
@@ -1484,6 +1487,13 @@ void onvif_reconnect() {
 }
 
 void onvif_server_start() {
+  if (!s_soapBuf) {
+    s_soapBuf = (char *)heap_caps_malloc(SOAP_BUF_SIZE, MALLOC_CAP_8BIT);
+    if (!s_soapBuf) {
+      Serial.println("[CRITICAL] Failed to allocate ONVIF SOAP buffer!");
+    }
+  }
+
   onvifServer.on("/onvif/device_service", HTTP_POST, handle_onvif_soap);
   onvifServer.on("/onvif/ptz_service", HTTP_POST,
                  handle_onvif_soap); // Route PTZ to same handler for now
