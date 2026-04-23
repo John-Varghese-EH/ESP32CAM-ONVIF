@@ -34,7 +34,7 @@ int CStreamer::SendRtpPacket(unsigned const char * jpeg, int jpegLen, int fragme
 #define KRtpHeaderSize 12           // size of the RTP header
 #define KJpegHeaderSize 8           // size of the special JPEG payload header
 
-#define MAX_FRAGMENT_SIZE 1400 // Larger fragments = fewer packets per frame (still under 1500 MTU)
+#define MAX_FRAGMENT_SIZE 1280 // Safe MTU for WiFi (1500 - headers)
     int fragmentLen = MAX_FRAGMENT_SIZE;
     if(fragmentLen + fragmentOffset > jpegLen) // Shrink last fragment if needed
         fragmentLen = jpegLen - fragmentOffset;
@@ -46,10 +46,10 @@ int CStreamer::SendRtpPacket(unsigned const char * jpeg, int jpegLen, int fragme
     bool includeQuantTbl = quant0tbl && quant1tbl && fragmentOffset == 0;
     uint8_t q = includeQuantTbl ? 128 : 0x5e;
 
-    char * const RtpBuf = m_RtpBuf; // use per-instance buffer instead of shared static
+    static char RtpBuf[2048]; // Note: we assume single threaded, this large buf we keep off of the tiny stack
     int RtpPacketSize = fragmentLen + KRtpHeaderSize + KJpegHeaderSize + (includeQuantTbl ? (4 + 64 * 2) : 0);
 
-    memset(RtpBuf, 0x00, 28); // Only clear header area (not entire 2KB buffer)
+    memset(RtpBuf,0x00,sizeof(RtpBuf));
     // Prepare the first 4 byte of the packet. This is the Rtp over Rtsp header in case of TCP based transport
     RtpBuf[0]  = '$';        // magic number
     RtpBuf[1]  = 0;          // number of multiplexed subchannel on RTPS connection - here the RTP channel
@@ -184,8 +184,12 @@ void CStreamer::streamFrame(unsigned const char *data, uint32_t dataLen, uint32_
     int offset = 0;
     do {
         offset = SendRtpPacket(data, dataLen, offset, qtable0, qtable1);
-        // Yield to let WiFi stack transmit; no artificial delay needed
+        // CRITICAL FOR SMOOTH STREAMING:
+        // Yield to allow WiFi stack to actually transmit the packet
+        // otherwise we fill the buffer and choke.
         yield();
+        // Tiny pacing to prevent UDP burst loss on router side
+        delayMicroseconds(500); 
     } while(offset != 0);
 
     // Increment ONLY after a full frame

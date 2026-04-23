@@ -1435,15 +1435,9 @@ void handle_onvif_discovery() {
         String ip = WiFi.localIP().toString();
 
         // WS-Discovery Probe Match Response
-        // This is the CRITICAL packet for NVRs to find the camera.
-        // - RelatesTo: Should match the MessageID of the Probe (omitted here
-        // for simplicity as UDP allows multicast broadcast).
-        // - Types: dn:NetworkVideoTransmitter (Tells NVR this is a Camera).
-        // - XAddrs: The URL to the implementation of the device service
-        // (http://<IP>:8000/onvif/device_service).
-        // - Scopes: onvif://www.onvif.org/Profile/Streaming (Capabilities).
-
-        String resp =
+        // Use stack buffer instead of String concatenation to prevent fragmentation
+        char resp[1200];
+        snprintf(resp, sizeof(resp), 
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
             "<SOAP-ENV:Envelope "
             "xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\" "
@@ -1454,30 +1448,40 @@ void handle_onvif_discovery() {
             "<ProbeMatches "
             "xmlns=\"http://schemas.xmlsoap.org/ws/2005/04/discovery\">"
             "<ProbeMatch>"
-            "<EndpointReference><Address>urn:uuid:esp32-cam-onvif-" +
-            WiFi.macAddress() +
-            "</Address></EndpointReference>"
+            "<EndpointReference><Address>urn:uuid:esp32-cam-onvif-%s</Address></EndpointReference>"
             "<Types>dn:NetworkVideoTransmitter</Types>"
             "<Scopes>onvif://www.onvif.org/type/Network_Video_Transmitter "
             "onvif://www.onvif.org/Profile/Streaming "
             "onvif://www.onvif.org/location/Office "
             "onvif://www.onvif.org/name/" DEVICE_MODEL
             " onvif://www.onvif.org/hardware/" DEVICE_HARDWARE_ID "</Scopes>"
-            "<XAddrs>http://" +
-            ip + ":" + String(ONVIF_PORT) +
-            "/onvif/device_service</XAddrs>"
+            "<XAddrs>http://%s:%d/onvif/device_service</XAddrs>"
             "<MetadataVersion>1</MetadataVersion>"
             "</ProbeMatch>"
             "</ProbeMatches>"
             "</SOAP-ENV:Body>"
-            "</SOAP-ENV:Envelope>";
+            "</SOAP-ENV:Envelope>",
+            WiFi.macAddress().c_str(), ip.c_str(), ONVIF_PORT);
+
         onvifUDP.beginPacket(onvifUDP.remoteIP(), onvifUDP.remotePort());
-        onvifUDP.write((const uint8_t *)resp.c_str(), resp.length());
+        onvifUDP.write((const uint8_t *)resp, strlen(resp));
         onvifUDP.endPacket();
       }
     }
   } // End if(packetSize > 0)
 } // End function
+
+void onvif_reconnect() {
+  // Re-bind WS-Discovery multicast after WiFi reconnection so NVRs can
+  // rediscover the camera on its (potentially new) IP address.
+  onvifUDP.stop();
+  delay(50);
+  if (onvifUDP.beginMulticast(IPAddress(239, 255, 255, 250), 3702)) {
+    Serial.println("[INFO] ONVIF WS-Discovery re-broadcast OK.");
+  } else {
+    Serial.println("[WARN] ONVIF WS-Discovery re-broadcast failed.");
+  }
+}
 
 void onvif_server_start() {
   onvifServer.on("/onvif/device_service", HTTP_POST, handle_onvif_soap);

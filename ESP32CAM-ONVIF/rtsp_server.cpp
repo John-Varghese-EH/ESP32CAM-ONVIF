@@ -11,11 +11,9 @@ WiFiServer rtspServer(RTSP_PORT);
 CRtspSession *session = nullptr;
 
 // Conditionally define the streamer type.
-// In H.264 mode we use CStreamer* so that a MyStreamer can be substituted
-// if H.264 encoder initialisation fails (MJPEG fallback).
 #ifdef VIDEO_CODEC_H264
     CStreamer *streamer = nullptr;
-    static bool s_h264Active = false; // true when the live streamer is H264Streamer
+    static bool s_h264Active = false;
 #else
     MyStreamer *streamer = nullptr;
 #endif
@@ -36,8 +34,6 @@ const char* getCodecName() {
     #endif
 }
 
-// Returns the H.264 encoder resolution appropriate for this build target.
-// Extracted to keep init and reinit paths consistent.
 static void getH264Resolution(uint16_t &width, uint16_t &height) {
     #ifdef H264_HW_ENCODER
         width  = 1280;
@@ -52,22 +48,19 @@ void rtsp_server_start() {
     #ifdef VIDEO_CODEC_H264
         Serial.println("[INFO] Creating H.264 streamer...");
         H264Streamer *h264 = new H264Streamer();
-        
         uint16_t width, height;
         getH264Resolution(width, height);
-        
+
         if (!h264->init(width, height)) {
             Serial.println("[ERROR] H.264 encoder init failed! Falling back to MJPEG.");
             delete h264;
-            // Fall back to MJPEG streamer so the server remains functional
             streamer = new MyStreamer();
             s_h264Active = false;
         } else {
             streamer = h264;
             s_h264Active = true;
         }
-        
-        Serial.printf("[INFO] RTSP server started at %s (%s)\n", 
+        Serial.printf("[INFO] RTSP server started at %s (%s)\n",
                       getRTSPUrl().c_str(), s_h264Active ? getCodecName() : "MJPEG (fallback)");
     #else
         Serial.println("[INFO] Creating MJPEG streamer...");
@@ -105,16 +98,14 @@ void rtsp_server_loop() {
                 Serial.println("[ERROR] Streamer is NULL! Re-initializing...");
                 #ifdef VIDEO_CODEC_H264
                     if (s_h264Active) {
-                        // Retry H.264 init with the same resolution used at startup
                         uint16_t width, height;
                         getH264Resolution(width, height);
                         H264Streamer *h264 = new H264Streamer();
                         if (!h264->init(width, height)) {
-                            Serial.println("[ERROR] H.264 reinit failed. Falling back to MJPEG.");
+                            Serial.println("[ERROR] H.264 reinit failed. Using MJPEG.");
                             delete h264;
                             streamer = new MyStreamer();
                             s_h264Active = false;
-                            Serial.println("[INFO] Streamer switched to MJPEG (H.264 unavailable).");
                         } else {
                             streamer = h264;
                         }
@@ -129,10 +120,10 @@ void rtsp_server_loop() {
             if (streamer) {
                 streamer->setClientSocket(clientPtr);
                 session = new CRtspSession(clientPtr, streamer);
-                Serial.printf("[INFO] RTSP Client Connected (%s stream)\n", getCodecName());
-                
+                Serial.printf("[INFO] RTSP Client Connected (%s, heap: %u)\n",
+                              getCodecName(), ESP.getFreeHeap());
+
                 #ifdef VIDEO_CODEC_H264
-                    // Request IDR frame for new client (only if H.264 streamer is active)
                     if (s_h264Active) {
                         static_cast<H264Streamer*>(streamer)->requestIDR();
                     }

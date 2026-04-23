@@ -10,9 +10,8 @@ struct WiFiCredentials {
 };
 
 // WiFi network info structure for scanning
-#define MAX_SCAN_NETWORKS 16  // Cap to prevent heap exhaustion in dense WiFi areas
 struct WiFiNetwork {
-  char ssid[33];       // Max SSID length = 32 + null (was heap-allocated String)
+  String ssid;
   int32_t rssi;
   uint8_t encType;
 };
@@ -54,7 +53,7 @@ public:
 private:
   bool _apMode;
   int _scannedNetworksCount;
-  WiFiNetwork _scannedNetworks[MAX_SCAN_NETWORKS]; // Fixed array, no dynamic allocation
+  WiFiNetwork* _scannedNetworks;
   unsigned long _lastConnectAttempt;
   
   // Stability Tracking

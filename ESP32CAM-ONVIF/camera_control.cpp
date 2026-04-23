@@ -34,10 +34,9 @@ bool camera_init() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.grab_mode = CAMERA_GRAB_LATEST; // Always grab freshest frame, discard stale
   if(psramFound()){
     config.frame_size = FRAMESIZE_VGA; // 640x480 - Rock Solid Stability for NVRs
-    config.jpeg_quality = 10;          // Optimized: slightly smaller frames, negligible quality loss
+    config.jpeg_quality = 12;          // High quality (lower num)
     config.fb_count = 2;
     Serial.println(F("[INFO] PSRAM found. Using VGA (640x480) and 2 Frame Buffers"));
   } else {
@@ -105,12 +104,11 @@ void ptz_init() {
     Serial.println("[INFO] PTZ Servos initialized.");
 }
 
-// x, y are ONVIF standard -1.0 to 1.0 (full servo range).
-// Maps linearly to servo angles 0..180°.
+// x, y are -1.0 to 1.0 (ONVIF standard usually) or 0.0 to 1.0
+// We'll assume input 0.0 to 1.0 for absolute move
 void ptz_set_absolute(float x, float y) {
-    // Convert ONVIF [-1, 1] range to servo [0°, 180°]
-    int panAngle  = (int)((x + 1.0f) / 2.0f * 180.0f);
-    int tiltAngle = (int)((y + 1.0f) / 2.0f * 180.0f);
+    int panAngle = (int)(x * 180.0f);
+    int tiltAngle = (int)(y * 180.0f);
     
     // Constrain
     if (panAngle < 0) panAngle = 0; if (panAngle > 180) panAngle = 180;

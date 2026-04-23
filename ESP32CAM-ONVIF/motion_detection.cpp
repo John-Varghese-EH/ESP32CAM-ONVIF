@@ -3,6 +3,9 @@
 
 #include <Arduino.h>
 #include "motion_detection.h"
+#include "mqtt_manager.h"
+#include "telegram_manager.h"
+#include "gdrive_manager.h"
 #include "esp_camera.h"
 
 // Frame-difference motion detection using average luminance
@@ -65,11 +68,29 @@ void motion_detection_loop() {
     if (diff > MOTION_THRESHOLD) {
         if (!motion) {
             Serial.printf("[MOTION] Detected! delta=%ld\n", (long)diff);
+            mqtt_publish_motion(true);
+            
+            bool needCapture = appSettings.telegramEnabled || (appSettings.googleDriveEnabled && appSettings.googleDriveMotion);
+            if (needCapture) {
+                camera_fb_t *snap = esp_camera_fb_get();
+                if (snap) {
+                    if (appSettings.telegramEnabled) {
+                        telegram_send_photo(snap);
+                    }
+                    if (appSettings.googleDriveEnabled && appSettings.googleDriveMotion) {
+                        uploadToGDriveAsync(snap);
+                    }
+                    esp_camera_fb_return(snap);
+                } else {
+                    Serial.println("[MOTION] Failed to capture frame for cloud upload.");
+                }
+            }
         }
         motion = true;
         _last_motion_time = millis();
     } else if (motion && (millis() - _last_motion_time > MOTION_COOLDOWN_MS)) {
         motion = false;
+        mqtt_publish_motion(false);
     }
 
     _prev_avg_luma = avg_luma;
