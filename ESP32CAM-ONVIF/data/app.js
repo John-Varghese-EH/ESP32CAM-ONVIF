@@ -664,7 +664,7 @@ async function importSettings() {
 // ==================== WIFI ====================
 async function connectWifi(ssid) {
     const password = prompt(`Enter password for "${ssid}":`);
-    if (password === null) return; // User cancelled
+    if (password === null) return;
     
     showToast(`Connecting to ${ssid}...`);
     const result = await api('/api/wifi/connect', { 
