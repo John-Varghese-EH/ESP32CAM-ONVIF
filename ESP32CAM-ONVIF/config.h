@@ -139,8 +139,7 @@
 #define ENABLE_DAILY_RECORDING false // Continuous recording (loop overwrite)
 #define RECORD_SEGMENT_SEC 300       // 5 minutes per file (300 seconds)
 #define MAX_DISK_USAGE_PCT 90        // Auto-delete oldest when disk > 90%
-#define ENABLE_MOTION_DETECTION                                                \
-  true // Lightweight luminance-based motion detection
+#define ENABLE_MOTION_DETECTION false // Lightweight luminance-based motion detection
 
 // 💡 TIP: Enable motion detection only if you're NOT using Bluetooth to save
 // memory
@@ -153,15 +152,15 @@
 // ⚠️ WARNING: GPIO 4 (AI-Thinker) conflicts with SD Card Data1 line.
 //   - If FLASH_LED_ENABLED = true, SD card MUST use 1-bit mode
 //   - DISABLED by default for maximum compatibility
-#define FLASH_LED_ENABLED false  // Enable flash LED (set true if supported)
+#define FLASH_LED_ENABLED true  // Enable flash LED (set true if supported)
 #define FLASH_LED_INVERT false   // false = High is ON (board-specific)
-#define DEFAULT_AUTO_FLASH false // Auto-enable flash in low light
+#define DEFAULT_AUTO_FLASH true // Auto-enable flash in low light
 // Note: FLASH_LED_PIN is defined per-board in board_config.h
 
 // --- Status LED Settings ---
 // ⚠️ WARNING: Not all boards have a status LED. Check your board schematic.
 //   - DISABLED by default to prevent conflicts
-#define STATUS_LED_ENABLED false // Enable status LED (set true if supported)
+#define STATUS_LED_ENABLED true // Enable status LED (set true if supported)
 #define STATUS_LED_INVERT true   // true = Low is ON (common anode LED)
 // Note: STATUS_LED_PIN is defined per-board in board_config.h
 
@@ -263,8 +262,8 @@
 #define DAYLIGHT_OFFSET 0    // Daylight saving offset (seconds)
 
 // --- Debugging & Serial Output ---
-#define DEBUG_MODE false // Set true to enable serial debug output
-#define DEBUG_LEVEL 0    // 1=Errors, 2=Info/Actions, 3=Verbose
+#define DEBUG_MODE true // Set true to enable serial debug output
+#define DEBUG_LEVEL 2    // 1=Errors, 2=Info/Actions, 3=Verbose
 
 #if DEBUG_MODE
 #define LOG_E(x) Serial.println("[ERROR] " + String(x))
