@@ -50,6 +50,34 @@ def minify_css(css: str) -> str:
     return css
 
 
+def validate_js(js: str, filename: str = "unknown") -> tuple[bool, str]:
+    """Basic JavaScript syntax validation using regex patterns."""
+    # Check for common syntax issues
+    issues = []
+    
+    # Check for unmatched braces
+    open_braces = js.count('{')
+    close_braces = js.count('}')
+    if open_braces != close_braces:
+        issues.append(f"Unmatched braces: {open_braces} open, {close_braces} close")
+    
+    # Check for unmatched parentheses  
+    open_parens = js.count('(')
+    close_parens = js.count(')')
+    if open_parens != close_parens:
+        issues.append(f"Unmatched parentheses: {open_parens} open, {close_parens} close")
+    
+    # Check for unmatched brackets
+    open_brackets = js.count('[')
+    close_brackets = js.count(']')
+    if open_brackets != close_brackets:
+        issues.append(f"Unmatched brackets: {open_brackets} open, {close_brackets} close")
+    
+    if issues:
+        return False, f"{filename}: " + "; ".join(issues)
+    return True, "OK"
+
+
 def minify_js(js: str) -> str:
     """Built-in JS minifier - no external dependencies."""
     lines = js.split('\n')
@@ -102,14 +130,25 @@ def minify_js(js: str) -> str:
     # Remove excess whitespace but be careful with operators
     # Only remove spaces around specific safe operators
     js = re.sub(r'\s*([{};,])\s*', r'\1', js)
+    # Note: - must be at end of character class or escaped to avoid range interpretation
     js = re.sub(r'\s*([=:?<>!+\-*/&|^~%])\s*', r'\1', js)
     
     # Restore needed spaces after keywords (use word boundary)
-    keywords = ['return', 'const', 'let', 'var', 'if', 'else', 'for', 'while', 
-                'function', 'async', 'await', 'new', 'typeof', 'instanceof', 'throw']
-    for kw in keywords:
-        # Only add space if keyword is followed by non-punctuation
-        js = re.sub(rf'\b{kw}\b(?=[a-zA-Z0-9_$])', rf'{kw} ', js)
+    # Critical: These keywords MUST have a space after them for valid JS
+    keywords_needing_space = [
+        'return', 'const', 'let', 'var', 'if', 'else', 'for', 'while', 
+        'function', 'async', 'await', 'new', 'typeof', 'instanceof', 'throw',
+        'case', 'catch', 'finally', 'switch', 'do', 'try', 'with'
+    ]
+    for kw in keywords_needing_space:
+        # Add space after keyword if followed by identifier, number, or opening bracket/paren
+        js = re.sub(rf'\b{kw}\b(?=[a-zA-Z0-9_$(\'"`])', rf'{kw} ', js)
+    
+    # Ensure space after 'else' before 'if' (else if)
+    js = re.sub(r'\belse\bif\b', 'else if', js)
+    
+    # Fix any double spaces that might have been introduced
+    js = re.sub(r'  +', ' ', js)
     
     return js
 
@@ -202,6 +241,7 @@ def main():
     parser = argparse.ArgumentParser(description="Build ESP32-CAM ONVIF Web UI")
     parser.add_argument('--no-minify', action='store_true', help='Skip minification')
     parser.add_argument('-o', '--output', type=str, help='Output file path')
+    parser.add_argument('--check', action='store_true', help='Validate JS without building')
     args = parser.parse_args()
     
     print("\n" + "="*50)
@@ -222,6 +262,29 @@ def main():
     print(f"[+] Output: {out}")
     print(f"[+] Minify: {'NO' if args.no_minify else 'YES'}")
     
+    # Validate JS files first
+    print("\n[0/4] Validating JavaScript...")
+    js_valid = True
+    if (data / "app.js").exists():
+        js_content = read_file(data / "app.js")
+        valid, msg = validate_js(js_content, "app.js")
+        if not valid:
+            print(f"  [!] {msg}")
+            js_valid = False
+        else:
+            print(f"  [+] app.js: {msg}")
+    
+    if args.check:
+        if js_valid:
+            print("\n[+] All validations passed!")
+            sys.exit(0)
+        else:
+            print("\n[!] Validation failed!")
+            sys.exit(1)
+    
+    if not js_valid:
+        print("\n[!] Continuing build despite validation warnings...")
+    
     # Calculate original size
     orig = len(read_file(html_file))
     if (data / "style.css").exists():
@@ -229,17 +292,19 @@ def main():
     if (data / "app.js").exists():
         orig += len(read_file(data / "app.js"))
     
-    print("\n[1/3] Reading files...")
+    print("\n[1/4] Reading files...")
     html = read_file(html_file)
     
-    print("[2/3] Inlining resources...")
+    print("[2/4] Inlining resources...")
     html = inline_resources(html, data, minify=not args.no_minify)
     
     if not args.no_minify:
-        print("[3/3] Minifying HTML...")
+        print("[3/4] Minifying HTML...")
         html = minify_html(html)
     else:
-        print("[3/3] Skipping minification...")
+        print("[3/4] Skipping minification...")
+    
+    print("[4/4] Generating header...")
     
     html = escape_raw_literal(html)
     header = generate_header(html)

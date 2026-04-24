@@ -597,6 +597,35 @@ function ptzMove(pan, tilt) {
     api('/api/ptz/control', { method: 'POST', body: JSON.stringify({ pan, tilt }) });
 }
 
+function ptzStep(axis, direction) {
+    const stepSize = parseInt(el('ptz-step-size')?.value) || 5;
+    const pan = axis === 'pan' ? direction * stepSize : 0;
+    const tilt = axis === 'tilt' ? direction * stepSize : 0;
+    ptzMove(pan, tilt);
+}
+
+function ptzHome() {
+    ptzControl('home');
+}
+
+function togglePatrol() {
+    const btn = el('btn-ptz-patrol');
+    if (btn.innerText.includes('Start')) {
+        btn.innerText = 'Stop Patrol Sweep';
+        api('/api/ptz/control', { method: 'POST', body: JSON.stringify({ action: 'patrol', state: 'start' }) });
+        showToast('PTZ patrol started');
+    } else {
+        btn.innerText = 'Start Patrol Sweep';
+        api('/api/ptz/control', { method: 'POST', body: JSON.stringify({ action: 'patrol', state: 'stop' }) });
+        showToast('PTZ patrol stopped');
+    }
+}
+
+function togglePtzTracking(enabled) {
+    api('/api/ptz/tracking', { method: 'POST', body: JSON.stringify({ enabled }) });
+    showToast(enabled ? 'Human auto-tracking enabled' : 'Human auto-tracking disabled');
+}
+
 // ==================== SETTINGS EXPORT / IMPORT ====================
 async function exportSettings() {
     const a = document.createElement('a');
@@ -633,6 +662,24 @@ async function importSettings() {
 }
 
 // ==================== WIFI ====================
+async function connectWifi(ssid) {
+    const password = prompt(`Enter password for "${ssid}":`);
+    if (password === null) return; // User cancelled
+    
+    showToast(`Connecting to ${ssid}...`);
+    const result = await api('/api/wifi/connect', { 
+        method: 'POST', 
+        body: JSON.stringify({ ssid, password }) 
+    });
+    
+    if (result && result.ok) {
+        showToast(`Connected to ${ssid}!`);
+        setTimeout(updateWifi, 2000);
+    } else {
+        showToast('Connection failed. Check password.');
+    }
+}
+
 async function updateWifi() {
     const d = await api('/api/wifi/status');
     if (d) {
@@ -649,7 +696,7 @@ async function scanWifi() {
         el('wifi-list').innerHTML = d.networks.map(n => `
             <div class="wifi-item">
                 <div><b>${n.ssid}</b> <span class="wifi-sig">${n.rssi}dBm</span></div>
-                <button class="btn" style="padding:4px 10px; font-size:0.8rem" onclick="connect('${n.ssid}')">Connect</button>
+                <button class="btn" style="padding:4px 10px; font-size:0.8rem" onclick="connectWifi('${n.ssid}')">Connect</button>
             </div>
         `).join('');
     }
