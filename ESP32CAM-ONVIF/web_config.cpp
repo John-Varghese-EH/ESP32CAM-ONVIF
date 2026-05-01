@@ -890,7 +890,7 @@ void web_config_start() {
     // === STREAM ENDPOINT ===
     webConfigServer.on("/stream", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
-        
+
         // Guard: only one concurrent stream client
         if (s_streamActive) {
             webConfigServer.send(503, "text/plain", "Stream busy - another client is connected");
@@ -1137,15 +1137,39 @@ void web_config_start() {
         vTaskDelete(NULL);
     };
 
+    // === OTA Backend State & Preparation ===
+    static volatile int ota_progress = -1;
+    static String ota_status_msg = "";
+    static String ota_status_detail = "";
+
+    auto prepare_for_ota = []() {
+        Serial.println("[OTA] Preparing for OTA: Stopping services to free memory...");
+        sd_recorder_stop_manual();
+        // Stop camera to free massive framebuffers back to PSRAM/Heap
+        esp_camera_deinit();
+        delay(500);
+    };
+
     // === OTA Firmware Update (with authentication) ===
     webConfigServer.on("/api/update", HTTP_POST, []() {
         if (!isAuthenticated(webConfigServer)) return;
-        bool success = !Update.hasError();
-        webConfigServer.send(200, "application/json", 
-            success ? "{\"success\":true}" : "{\"success\":false}");
-        if (success) {
-            delay(500);
-            ESP.restart();
+        HTTPUpload& upload = webConfigServer.upload();
+        if (upload.status == UPLOAD_FILE_START) {
+            Serial.printf("[OTA] Update: %s\n", upload.filename.c_str());
+            prepare_for_ota();
+            if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_WRITE) {
+            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+                Update.printError(Serial);
+            }
+        } else if (upload.status == UPLOAD_FILE_END) {
+            if (Update.end(true)) {
+                Serial.printf("[OTA] Success: %u bytes\n", upload.totalSize);
+            } else {
+                Update.printError(Serial);
+            }
         }
     }, [prepare_for_ota]() {
         // Auth check on upload start
@@ -1353,8 +1377,9 @@ void web_config_start() {
     webConfigServer.begin();
         Serial.println("[INFO] Web config server started.");
     }
+}
 
-    void web_config_loop() {
+void web_config_loop() {
         webConfigServer.handleClient();
         
         // Track heap low-water mark for fragmentation monitoring

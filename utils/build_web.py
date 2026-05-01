@@ -253,6 +253,17 @@ def main():
     data = root / "ESP32CAM-ONVIF" / "data"
     out = Path(args.output) if args.output else root / "ESP32CAM-ONVIF" / "index_html.h"
     html_file = data / "index.html"
+
+    # Check if the expected data directory exists, if not try alternative path
+    if not data.exists():
+        # Try alternative path structure
+        data = root / "data"
+        out = Path(args.output) if args.output else root / "index_html.h"
+        html_file = data / "index.html"
+
+        if not data.exists():
+            print(f"\n[ERROR] Data directory not found at {root / 'ESP32CAM-ONVIF' / 'data'} or {root / 'data'}")
+            sys.exit(1)
     
     if not html_file.exists():
         print(f"\n[ERROR] Not found: {html_file}")
