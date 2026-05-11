@@ -542,7 +542,7 @@ ESP32CAM-ONVIF/
 |-- CRtspSession.cpp/h        # RTSP session management (optimized static buffers)
 |-- CStreamer.cpp/h            # RTP packetization
 |-- web_config.cpp/h           # REST API and WebServer routes
-|-- config.cpp                 # Settings persistence (SPIFFS JSON)
+|-- config.cpp                 # Settings persistence (LittleFS JSON)
 |-- motion_detection.cpp/h     # Luminance-based motion detection
 |-- sd_recorder.cpp/h          # SD card recording (manual + DashCam continuous)
 |-- mqtt_manager.cpp/h         # MQTT client (dynamic FreeRTOS task)

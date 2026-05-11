@@ -79,90 +79,187 @@ def validate_js(js: str, filename: str = "unknown") -> tuple[bool, str]:
 
 
 def minify_js(js: str) -> str:
-    """Built-in JS minifier - no external dependencies."""
-    lines = js.split('\n')
+    """Safe JS minifier using tokenization to protect string/template content.
+    
+    The old approach applied regexes to the whole source, corrupting:
+    - Multi-line template literals (item.innerHTML = `...`)
+    - HTML strings passed to innerHTML containing < > operators
+    - CSS selectors in querySelector strings
+    """
+    placeholders = {}
+    counter = [0]
+
+    # Tokenize: find strings, template literals, and comments in source order.
+    # Template literals may be nested (e.g. `${items.map(i=>`<li>${i}</li>`)}`),
+    # so we use a state machine instead of a single regex.
     result = []
-    in_multiline_comment = False
-    
-    for line in lines:
-        # Handle multi-line comments
-        if in_multiline_comment:
-            if '*/' in line:
-                line = line[line.index('*/') + 2:]
-                in_multiline_comment = False
-            else:
-                continue
-        
-        # Remove single-line comments (but not URLs with //)
-        if '//' in line and 'http' not in line:
-            # Find // that's not in a string
-            in_string = False
-            string_char = None
-            for i, char in enumerate(line):
-                if char in '"\'`' and (i == 0 or line[i-1] != '\\'):
-                    if not in_string:
-                        in_string = True
-                        string_char = char
-                    elif char == string_char:
-                        in_string = False
-                elif char == '/' and i + 1 < len(line) and line[i+1] == '/' and not in_string:
-                    line = line[:i]
+    i = 0
+    n = len(js)
+
+    while i < n:
+        # Block comment /* ... */
+        if js[i:i+2] == '/*':
+            end = js.find('*/', i + 2)
+            if end == -1:
+                end = n - 2
+            comment = js[i:end+2]
+            # Preserve newlines inside block comment for ASI
+            newlines = comment.count('\n')
+            result.append('\n' * newlines if newlines else ' ')
+            i = end + 2
+            continue
+
+        # Line comment // ...
+        if js[i:i+2] == '//':
+            end = js.find('\n', i + 2)
+            if end == -1:
+                end = n
+            result.append('\n')   # preserve line break
+            i = end
+            continue
+
+        # Double-quoted string
+        if js[i] == '"':
+            j = i + 1
+            while j < n:
+                if js[j] == '\\':
+                    j += 2
+                elif js[j] == '"':
+                    j += 1
                     break
-        
-        # Start of multi-line comment
-        if '/*' in line:
-            before = line[:line.index('/*')]
-            after = line[line.index('/*') + 2:]
-            if '*/' in after:
-                line = before + after[after.index('*/') + 2:]
-            else:
-                line = before
-                in_multiline_comment = True
-        
-        # Trim whitespace
-        line = line.strip()
-        if line:
-            result.append(line)
-    
-    # Join lines with single space
-    js = ' '.join(result)
-    
-    # Remove excess whitespace but be careful with operators
-    # Only remove spaces around specific safe operators
-    js = re.sub(r'\s*([{};,])\s*', r'\1', js)
-    # Note: - must be at end of character class or escaped to avoid range interpretation
-    js = re.sub(r'\s*([=:?<>!+\-*/&|^~%])\s*', r'\1', js)
-    
-    # Restore needed spaces after keywords (use word boundary)
-    # Critical: These keywords MUST have a space after them for valid JS
+                else:
+                    j += 1
+            key = f'\x00S{counter[0]}\x00'
+            placeholders[key] = js[i:j]
+            counter[0] += 1
+            result.append(key)
+            i = j
+            continue
+
+        # Single-quoted string
+        if js[i] == "'":
+            j = i + 1
+            while j < n:
+                if js[j] == '\\':
+                    j += 2
+                elif js[j] == "'":
+                    j += 1
+                    break
+                else:
+                    j += 1
+            key = f'\x00S{counter[0]}\x00'
+            placeholders[key] = js[i:j]
+            counter[0] += 1
+            result.append(key)
+            i = j
+            continue
+
+        # Template literal ` ... ` (handles nesting via brace counting)
+        if js[i] == '`':
+            j = i + 1
+            depth = 0
+            while j < n:
+                if js[j] == '\\':
+                    j += 2
+                elif js[j:j+2] == '${':
+                    depth += 1
+                    j += 2
+                elif js[j] == '}' and depth > 0:
+                    depth -= 1
+                    j += 1
+                elif js[j] == '`' and depth == 0:
+                    j += 1
+                    break
+                else:
+                    j += 1
+            key = f'\x00S{counter[0]}\x00'
+            placeholders[key] = js[i:j]
+            counter[0] += 1
+            result.append(key)
+            i = j
+            continue
+
+        result.append(js[i])
+        i += 1
+
+    code = ''.join(result)
+
+    # --- Safely minify the code (no string content remains) ---
+
+    # Remove trailing whitespace per line
+    code = re.sub(r'[ \t]+\n', '\n', code)
+    # Remove leading whitespace (indentation) per line
+    code = re.sub(r'\n[ \t]+', '\n', code)
+    # Collapse multiple spaces/tabs (but not newlines)
+    code = re.sub(r'[ \t]{2,}', ' ', code)
+    # Remove spaces around { } ; ,
+    code = re.sub(r'[ \t]*([{};,])[ \t]*', r'\1', code)
+    # Remove spaces around common operators (horizontal whitespace only)
+    code = re.sub(r'[ \t]*([=+\-*/%&|^~!<>?:])[ \t]*', r'\1', code)
+    # Collapse multiple blank lines to one
+    code = re.sub(r'\n{3,}', '\n\n', code)
+    # Remove blank lines entirely
+    code = '\n'.join(line for line in code.split('\n') if line.strip())
+
+    # Restore mandatory keyword spaces
     keywords_needing_space = [
-        'return', 'const', 'let', 'var', 'if', 'else', 'for', 'while', 
-        'function', 'async', 'await', 'new', 'typeof', 'instanceof', 'throw',
-        'case', 'catch', 'finally', 'switch', 'do', 'try', 'with'
+        'return', 'const', 'let', 'var', 'if', 'else', 'for', 'while',
+        'function', 'async', 'await', 'new', 'typeof', 'instanceof',
+        'throw', 'case', 'catch', 'finally', 'switch', 'do', 'try',
+        'delete', 'void', 'in', 'of',
     ]
     for kw in keywords_needing_space:
-        # Add space after keyword if followed by identifier, number, or opening bracket/paren
-        js = re.sub(rf'\b{kw}\b(?=[a-zA-Z0-9_$(\'"`])', rf'{kw} ', js)
-    
-    # Ensure space after 'else' before 'if' (else if)
-    js = re.sub(r'\belse\bif\b', 'else if', js)
-    
-    # Fix any double spaces that might have been introduced
-    js = re.sub(r'  +', ' ', js)
-    
-    return js
+        code = re.sub(
+            rf'\b{kw}\b(?=[a-zA-Z0-9_$(\'"`\x00])',
+            rf'{kw} ',
+            code
+        )
+
+    # else if (must come after keyword restoration)
+    code = re.sub(r'\belse\s*if\b', 'else if', code)
+
+    # Restore string/template placeholders
+    for key, val in placeholders.items():
+        code = code.replace(key, val)
+
+    return code
 
 
 def minify_html(html: str) -> str:
-    """Built-in HTML minifier - no external dependencies."""
-    # Remove HTML comments (but not conditional comments)
+    """Built-in HTML minifier - preserves <script> and <style> content.
+    
+    Critical: JS/CSS are already minified at inlining time. Collapsing
+    whitespace inside <script> blocks breaks JavaScript ASI (Automatic
+    Semicolon Insertion) and multi-line string literals.
+    """
+    # Step 1: Extract script and style blocks, replace with placeholders
+    placeholders = {}
+    counter = [0]
+
+    def extract_block(match):
+        tag = match.group(0)
+        key = f'\x00BLOCK{counter[0]}\x00'
+        placeholders[key] = tag
+        counter[0] += 1
+        return key
+
+    # Extract <script>...</script> blocks (preserve their content exactly)
+    html = re.sub(r'<script(?:\s[^>]*)?>.*?</script>', extract_block,
+                  html, flags=re.DOTALL | re.IGNORECASE)
+    # Extract <style>...</style> blocks
+    html = re.sub(r'<style(?:\s[^>]*)?>.*?</style>', extract_block,
+                  html, flags=re.DOTALL | re.IGNORECASE)
+
+    # Step 2: Minify the surrounding HTML structure
     html = re.sub(r'<!--(?!\[if).*?-->', '', html, flags=re.DOTALL)
-    # Collapse whitespace between tags
     html = re.sub(r'>\s+<', '><', html)
-    # Collapse other whitespace
     html = re.sub(r'\s+', ' ', html)
-    # Remove leading/trailing whitespace
     html = html.strip()
+
+    # Step 3: Re-inject the preserved blocks
+    for key, block in placeholders.items():
+        html = html.replace(key, block)
+
     return html
 
 

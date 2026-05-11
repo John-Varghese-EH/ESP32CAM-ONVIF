@@ -196,7 +196,7 @@
           John Varghese (J0X) · Github: John-Varghese-EH</div>
         <div class="video-feed-wrapper" id="video-wrapper">
           <div id="cctv-overlay" class="cctv-overlay" style="display: none;"></div>
-          <img id="stream" class="video-feed" src="" alt="">
+          <img id="stream" class="video-feed" crossorigin="anonymous" src="" alt="">
           <div id="stream-offline-overlay" class="stream-offline-overlay">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
               style="opacity:0.6">
@@ -425,6 +425,11 @@
 
         <div class="card glass-panel">
           <h3>Advanced</h3>
+          <div class="kv-group" title="Automatically reconnects the stream if it drops due to network/browser timeouts">
+            <span>Stream Auto-Reconnect</span>
+            <input type="checkbox" id="chk-autoreconnect" name="chk-autoreconnect" checked
+              onchange="localStorage.setItem('esp32cam_autoreconnect', this.checked ? '1' : '0');">
+          </div>
           <div class="kv-group">
             <span>Auto Flash</span>
             <input type="checkbox" id="chk-autoflash" name="chk-autoflash"

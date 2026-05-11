@@ -8,7 +8,7 @@
 #include "auto_flash.h"
 #include "camera_control.h"
 #include <FS.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <SD_MMC.h>
 #include <ArduinoJson.h>
 #include "esp_camera.h"
@@ -35,6 +35,14 @@
 
 WebServer webConfigServer(WEB_PORT);
 
+// Dedicated raw TCP server for MJPEG on port 81.
+// This is SEPARATE from webConfigServer so the stream never blocks
+// webConfigServer.handleClient(), allowing flash, config, and all
+// API calls to work freely while the camera feed is active.
+static WiFiServer s_streamServer(81);
+static WiFiClient s_streamClient;
+static volatile bool s_streamActive = false;
+
 // Shared JSON response buffer (single-threaded, reused across API handlers)
 // Eliminates heap fragmentation from String concatenation
 static char s_jsonBuf[1024];
@@ -44,9 +52,6 @@ static char s_jsonBuf[1024];
 #define AUTH_LOCKOUT_MS   60000  // 60 second lockout
 static int s_authFailures = 0;
 static unsigned long s_lockoutStart = 0;
-
-// === SECURITY: Stream connection guard ===
-static volatile bool s_streamActive = false;
 
 // === Performance: Heap low-water mark ===
 static uint32_t s_minFreeHeap = UINT32_MAX;
@@ -84,9 +89,9 @@ bool isAuthenticated(WebServer &server) {
 }
 
 void web_config_start() {
-    // SPIFFS no longer required for index.html, but still needed for SD/Config persistence if used
-    if (!SPIFFS.begin(true)) {
-        Serial.println("[WARN] SPIFFS Mount Failed - Configs might not save");
+    // LittleFS no longer required for index.html, but still needed for SD/Config persistence if used
+    if (!LittleFS.begin(true)) {
+        Serial.println("[WARN] LittleFS Mount Failed - Configs might not save");
     }
 
     // Serving Embedded HTML
@@ -590,8 +595,8 @@ void web_config_start() {
         profileJson += "\"vflip\":" + String(s->status.vflip);
         profileJson += "}";
         
-        // Save to SPIFFS
-        File file = SPIFFS.open("/profiles/" + profileName + ".json", "w");
+        // Save to LittleFS
+        File file = LittleFS.open("/profiles/" + profileName + ".json", "w");
         if (file) {
             file.print(profileJson);
             file.close();
@@ -609,8 +614,8 @@ void web_config_start() {
         deserializeJson(doc, webConfigServer.arg("plain"));
         String profileName = doc["name"];
         
-        // Load from SPIFFS
-        File file = SPIFFS.open("/profiles/" + profileName + ".json", "r");
+        // Load from LittleFS
+        File file = LittleFS.open("/profiles/" + profileName + ".json", "r");
         if (!file) {
             webConfigServer.send(404, "application/json", "{\"error\":\"Profile not found\"}");
             return;
@@ -649,7 +654,7 @@ void web_config_start() {
         deserializeJson(doc, webConfigServer.arg("plain"));
         String profileName = doc["name"];
         
-        if (SPIFFS.remove("/profiles/" + profileName + ".json")) {
+        if (LittleFS.remove("/profiles/" + profileName + ".json")) {
             webConfigServer.send(200, "application/json", "{\"ok\":1}");
         } else {
             webConfigServer.send(404, "application/json", "{\"error\":\"Profile not found\"}");
@@ -887,90 +892,22 @@ void web_config_start() {
         }
     });
 
-    // === STREAM ENDPOINT ===
+    // === STREAM ENDPOINT (port 80) ===
+    // The MJPEG stream runs on a DEDICATED raw TCP server (port 81) via
+    // web_config_stream_loop().  This route on port 80 just redirects the
+    // browser there so webConfigServer.handleClient() is NEVER blocked.
     webConfigServer.on("/stream", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
-
-        // Guard: only one concurrent stream client
-        if (s_streamActive) {
-            webConfigServer.send(503, "text/plain", "Stream busy - another client is connected");
-            return;
-        }
-        s_streamActive = true;
-        
-        WiFiClient client = webConfigServer.client();
-        
-        // Security: restrict CORS to same-origin (removed wildcard)
-        String response = "HTTP/1.1 200 OK\r\n";
-        response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n";
-        response += "X-Content-Type-Options: nosniff\r\n";
-        response += "\r\n";
-        client.print(response);
-
-        Serial.println("[INFO] MJPEG Stream started");
-        
-        // Optimize TCP for streaming
-        client.setTimeout(2); // Set low timeout for writes (2s) to prevent blocking
-        
-        int64_t last_frame = 0;
-        const int frame_interval = 100; // 100ms = ~10 FPS
-
-        while (client.connected()) {
-            // CRITICAL: Feed the Watchdog Timer so the ESP32 doesn't reboot
-            esp_task_wdt_reset();
-            
-            // Keep critical background tasks alive (God Loop Pattern)
-            rtsp_server_loop();   
-            onvif_server_loop();
-            
-            int64_t now = esp_timer_get_time() / 1000;
-            if (now - last_frame < frame_interval) {
-                // Yield to allow WiFi stack to process
-                yield(); 
-                delay(10); // Sleep 10ms to save CPU
-                continue;
-            }
-            last_frame = now;
-
-            camera_fb_t *fb = esp_camera_fb_get();
-            if (!fb) {
-                Serial.println("[WARN] Frame buffer failed");
-                delay(100);
-                continue;
-            }
-            
-            // Send buffer using chunked writes if needed, but client.write handles it.
-            // Check if we can write to avoid stalling on full buffer
-            // (Standard Client doesn't expose availableForWrite easily on all cores, but write() is blocking with timeout)
-            
-            size_t dataLen = fb->len; // Cache before releasing!
-            size_t hlen = client.printf("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n", dataLen);
-            
-            // Implement chunked write to prevent WiFiClient buffer drops on large frames
-            size_t wlen = 0;
-            const size_t chunkSize = 2048;
-            for (size_t i = 0; i < dataLen; i += chunkSize) {
-                size_t toWrite = (dataLen - i < chunkSize) ? (dataLen - i) : chunkSize;
-                size_t written = client.write(fb->buf + i, toWrite);
-                if (written != toWrite) {
-                    break;
-                }
-                wlen += written;
-            }
-            
-            client.print("\r\n");
-            
-            esp_camera_fb_return(fb); // Release immediately
-            
-            if (wlen != dataLen) {
-                 Serial.printf("[WARN] Stream write failed (Sent %u of %u bytes). Client disconnected?\n", wlen, dataLen);
-                 break;
-            }
-        }
-        
-        Serial.println("[INFO] MJPEG Stream stopped");
-        s_streamActive = false;
+        // Redirect to the dedicated stream port
+        String host = webConfigServer.hostHeader();
+        // Replace port in host if present, otherwise append :81
+        int colonIdx = host.lastIndexOf(':');
+        if (colonIdx > 0) host = host.substring(0, colonIdx);
+        String location = "http://" + host + ":81/";
+        webConfigServer.sendHeader("Location", location, true);
+        webConfigServer.send(302, "text/plain", "Stream is on port 81");
     });
+
 
     // --- Snapshot endpoint ---
     webConfigServer.on("/snapshot", HTTP_GET, []() {
@@ -1040,6 +977,7 @@ void web_config_start() {
     // === OTA Backend State & Preparation ===
     static volatile int ota_progress = -1;
     static String ota_status_msg = "";
+    static String ota_status_detail = "";
 
     auto prepare_for_ota = []() {
         Serial.println("[OTA] Preparing for OTA: Stopping services to free memory...");
@@ -1137,42 +1075,19 @@ void web_config_start() {
         vTaskDelete(NULL);
     };
 
-    // === OTA Backend State & Preparation ===
-    static volatile int ota_progress = -1;
-    static String ota_status_msg = "";
-    static String ota_status_detail = "";
-
-    auto prepare_for_ota = []() {
-        Serial.println("[OTA] Preparing for OTA: Stopping services to free memory...");
-        sd_recorder_stop_manual();
-        // Stop camera to free massive framebuffers back to PSRAM/Heap
-        esp_camera_deinit();
-        delay(500);
-    };
-
     // === OTA Firmware Update (with authentication) ===
     webConfigServer.on("/api/update", HTTP_POST, []() {
+        // Response handler: called after upload completes
         if (!isAuthenticated(webConfigServer)) return;
-        HTTPUpload& upload = webConfigServer.upload();
-        if (upload.status == UPLOAD_FILE_START) {
-            Serial.printf("[OTA] Update: %s\n", upload.filename.c_str());
-            prepare_for_ota();
-            if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
-                Update.printError(Serial);
-            }
-        } else if (upload.status == UPLOAD_FILE_WRITE) {
-            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-                Update.printError(Serial);
-            }
-        } else if (upload.status == UPLOAD_FILE_END) {
-            if (Update.end(true)) {
-                Serial.printf("[OTA] Success: %u bytes\n", upload.totalSize);
-            } else {
-                Update.printError(Serial);
-            }
+        if (Update.hasError()) {
+            webConfigServer.send(500, "application/json", "{\"error\":\"Update failed\"}");
+        } else {
+            webConfigServer.send(200, "application/json", "{\"success\":true,\"message\":\"Update complete. Rebooting...\"}");
+            delay(1000);
+            ESP.restart();
         }
     }, [prepare_for_ota]() {
-        // Auth check on upload start
+        // Upload handler: processes firmware data chunks
         if (!webConfigServer.authenticate(WEB_USER, WEB_PASS)) {
             return;
         }
@@ -1199,53 +1114,78 @@ void web_config_start() {
     // === GitHub OTA Check ===
     webConfigServer.on("/api/update/check", HTTP_GET, []() {
         if (!isAuthenticated(webConfigServer)) return;
-        
+
+        // Only attempt if connected to the internet (not AP-only mode)
+        if (WiFi.status() != WL_CONNECTED) {
+            snprintf(s_jsonBuf, sizeof(s_jsonBuf),
+                "{\"current_version\":\"%s\",\"latest_version\":\"\","
+                "\"download_url\":\"\",\"offline\":true,"
+                "\"error\":\"Not connected to internet\"}",
+                FIRMWARE_VERSION);
+            webConfigServer.send(200, "application/json", s_jsonBuf);
+            return;
+        }
+
         WiFiClientSecure client;
-        client.setInsecure(); // GitHub API requires HTTPS. Using insecure for simplicity/memory.
+        client.setInsecure();
+        client.setTimeout(8); // 8-second timeout — don't hang the UI
+
         HTTPClient https;
-        
-        String url = String("https://api.github.com/repos/") + GITHUB_REPO_OWNER + "/" + GITHUB_REPO_NAME + "/releases/latest";
-        
-        if (https.begin(client, url)) {
-            int httpCode = https.GET();
-            if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
-                String payload = https.getString();
-                
-                // Parse JSON to get tag_name and browser_download_url
-                DynamicJsonDocument doc(4096);
-                DeserializationError error = deserializeJson(doc, payload);
-                
-                if (!error) {
-                    String tagName = doc["tag_name"] | "";
-                    String downloadUrl = "";
-                    
-                    JsonArray assets = doc["assets"];
-                    for (JsonObject asset : assets) {
-                        String name = asset["name"] | "";
-                        if (name.endsWith(".bin")) {
-                            downloadUrl = asset["browser_download_url"] | "";
-                            break;
-                        }
-                    }
-                    
-                    String response = "{";
-                    response += "\"current_version\":\"" + String(FIRMWARE_VERSION) + "\",";
-                    response += "\"latest_version\":\"" + tagName + "\",";
-                    response += "\"download_url\":\"" + downloadUrl + "\"";
-                    response += "}";
-                    
-                    webConfigServer.send(200, "application/json", response);
-                } else {
-                    webConfigServer.send(500, "application/json", "{\"error\":\"Failed to parse GitHub response\"}");
-                }
-            } else {
-                webConfigServer.send(500, "application/json", "{\"error\":\"Failed to fetch from GitHub: " + String(httpCode) + "\"}");
-            }
+        https.setTimeout(8000);
+
+        String url = String("https://api.github.com/repos/")
+                     + GITHUB_REPO_OWNER + "/" + GITHUB_REPO_NAME + "/releases/latest";
+
+        if (!https.begin(client, url)) {
+            snprintf(s_jsonBuf, sizeof(s_jsonBuf),
+                "{\"current_version\":\"%s\",\"latest_version\":\"\","
+                "\"download_url\":\"\",\"offline\":true,"
+                "\"error\":\"Unable to connect to GitHub API\"}",
+                FIRMWARE_VERSION);
+            webConfigServer.send(200, "application/json", s_jsonBuf);
+            return;
+        }
+
+        int httpCode = https.GET();
+
+        if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+            String payload = https.getString();
             https.end();
+
+            DynamicJsonDocument doc(4096);
+            DeserializationError error = deserializeJson(doc, payload);
+
+            if (!error) {
+                String tagName    = doc["tag_name"] | "";
+                String downloadUrl = "";
+                JsonArray assets = doc["assets"];
+                for (JsonObject asset : assets) {
+                    String name = asset["name"] | "";
+                    if (name.endsWith(".bin")) {
+                        downloadUrl = asset["browser_download_url"] | "";
+                        break;
+                    }
+                }
+                snprintf(s_jsonBuf, sizeof(s_jsonBuf),
+                    "{\"current_version\":\"%s\",\"latest_version\":\"%s\","
+                    "\"download_url\":\"%s\",\"offline\":false}",
+                    FIRMWARE_VERSION, tagName.c_str(), downloadUrl.c_str());
+                webConfigServer.send(200, "application/json", s_jsonBuf);
+            } else {
+                webConfigServer.send(200, "application/json",
+                    "{\"error\":\"Failed to parse GitHub response\",\"offline\":false}");
+            }
         } else {
-            webConfigServer.send(500, "application/json", "{\"error\":\"Unable to connect to GitHub API\"}");
+            https.end();
+            snprintf(s_jsonBuf, sizeof(s_jsonBuf),
+                "{\"current_version\":\"%s\",\"latest_version\":\"\","
+                "\"download_url\":\"\",\"offline\":true,"
+                "\"error\":\"GitHub returned HTTP %d\"}",
+                FIRMWARE_VERSION, httpCode);
+            webConfigServer.send(200, "application/json", s_jsonBuf);
         }
     });
+
 
     // === GitHub OTA Download & Install (Async) ===
     webConfigServer.on("/api/update/github", HTTP_POST, [prepare_for_ota, otaGithubTask]() {
@@ -1375,16 +1315,100 @@ void web_config_start() {
     webdav_server_init(&webConfigServer);
 
     webConfigServer.begin();
-        Serial.println("[INFO] Web config server started.");
+    s_streamServer.begin();
+    Serial.println("[INFO] Web config server started on port 80, stream server on port 81.");
+    }
+
+
+
+void web_config_loop() {
+    webConfigServer.handleClient();
+
+    // Track heap low-water mark for fragmentation monitoring
+    uint32_t freeHeap = ESP.getFreeHeap();
+    if (freeHeap < s_minFreeHeap) {
+        s_minFreeHeap = freeHeap;
     }
 }
 
-void web_config_loop() {
-        webConfigServer.handleClient();
-        
-        // Track heap low-water mark for fragmentation monitoring
-        uint32_t freeHeap = ESP.getFreeHeap();
-        if (freeHeap < s_minFreeHeap) {
-            s_minFreeHeap = freeHeap;
+// ---------------------------------------------------------------------------
+// web_config_stream_loop() - call from the main Arduino loop().
+// Accepts new clients on port 81 and streams MJPEG until they disconnect.
+// Because this runs in the same loop() as web_config_loop(), both are
+// non-blocking: web_config_loop() serves API requests while
+// web_config_stream_loop() pumps frames to the active stream client.
+// ---------------------------------------------------------------------------
+void web_config_stream_loop() {
+    // Accept a new client if none is active
+    if (!s_streamActive) {
+        WiFiClient newClient = s_streamServer.accept();
+        if (newClient) {
+            // Read and discard the HTTP request headers
+            unsigned long t = millis();
+            while (newClient.connected() && millis() - t < 1000) {
+                if (newClient.available()) {
+                    String line = newClient.readStringUntil('\n');
+                    if (line == "\r") break; // blank line = end of headers
+                }
+            }
+            // Send MJPEG response headers
+            newClient.print(
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
+                "Cache-Control: no-cache\r\n"
+                "Access-Control-Allow-Origin: *\r\n"
+                "Connection: close\r\n"
+                "\r\n"
+            );
+            newClient.setTimeout(2);
+            s_streamClient = newClient;
+            s_streamActive = true;
+            Serial.println("[INFO] MJPEG Stream client connected on port 81");
         }
+        return; // nothing to stream yet
     }
+
+    // Disconnect check
+    if (!s_streamClient.connected()) {
+        Serial.println("[INFO] MJPEG Stream client disconnected");
+        s_streamClient.stop();
+        s_streamActive = false;
+        return;
+    }
+
+    // Rate-limit to ~10 FPS
+    static int64_t s_lastFrame = 0;
+    int64_t now = esp_timer_get_time() / 1000;
+    if (now - s_lastFrame < 100) return;
+    s_lastFrame = now;
+
+    esp_task_wdt_reset();
+
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (!fb) return;
+
+    size_t dataLen = fb->len;
+    s_streamClient.printf(
+        "--frame\r\n"
+        "Content-Type: image/jpeg\r\n"
+        "Content-Length: %u\r\n\r\n",
+        dataLen
+    );
+
+    const size_t chunkSize = 2048;
+    size_t wlen = 0;
+    for (size_t i = 0; i < dataLen; i += chunkSize) {
+        size_t toWrite = (dataLen - i < chunkSize) ? (dataLen - i) : chunkSize;
+        size_t written = s_streamClient.write(fb->buf + i, toWrite);
+        if (written != toWrite) { wlen = 0; break; }
+        wlen += written;
+    }
+    s_streamClient.print("\r\n");
+    esp_camera_fb_return(fb);
+
+    if (wlen != dataLen) {
+        Serial.println("[WARN] Stream write incomplete — client dropped");
+        s_streamClient.stop();
+        s_streamActive = false;
+    }
+}

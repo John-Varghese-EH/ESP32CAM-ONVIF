@@ -193,8 +193,8 @@
 // To enable Bluetooth:
 //   1. Uncomment the line below
 //   2. For ESP32 Classic: Set Partition Scheme to "Huge APP (3MB No OTA/1MB
-//   SPIFFS)"
-//      Arduino IDE: Tools → Partition Scheme → Huge APP (3MB No OTA/1MB SPIFFS)
+//   LittleFS)"
+//      Arduino IDE: Tools → Partition Scheme → Huge APP (3MB No OTA/1MB LittleFS)
 //   3. Recompile and upload
 
 // #define BLUETOOTH_ENABLED     // ← Uncomment to enable Bluetooth features
@@ -282,7 +282,7 @@
 // ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 // ┃ SECTION 11: RUNTIME SETTINGS STRUCTURE                                 ┃
 // ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-// These settings are stored in SPIFFS and persist across reboots
+// These settings are stored in LittleFS and persist across reboots
 // Modified via Web UI, not typically changed in code
 
 enum AudioSource {

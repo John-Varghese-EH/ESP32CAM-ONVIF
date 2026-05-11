@@ -133,7 +133,7 @@ function toggleStream() {
         img.alt = "Paused";
         el('status-text').innerText = "Paused";
     } else {
-        img.src = "/stream?t=" + Date.now(); // Start with cache bust
+        img.src = "http://" + window.location.hostname + ":81/?t=" + Date.now(); // Start with cache bust
         img.alt = "Connecting...";
         el('status-text').innerText = "Connecting...";
     }
@@ -1060,11 +1060,21 @@ streamImg.onerror = () => {
     console.log("Stream error/disconnect. Retrying...");
     el('status-text').innerText = "Reconnecting...";
     el('status-pill').classList.add('offline');
-    setTimeout(() => {
-        if (streamImg.src.includes('/stream')) {
-            streamImg.src = '/stream?t=' + Date.now();
-        }
-    }, 2000);
+    
+    // Check user preference
+    const autoReconnect = localStorage.getItem('esp32cam_autoreconnect') !== '0';
+    if (autoReconnect) {
+        setTimeout(() => {
+            if (streamImg.src.includes('/stream') || streamImg.src.includes(':81')) {
+                streamImg.src = "http://" + window.location.hostname + ":81/?t=" + Date.now();
+            }
+        }, 2000);
+    } else {
+        console.log("Auto-reconnect disabled. Stream paused.");
+        el('status-text').innerText = "Paused";
+        streamImg.src = "";
+    }
+    
     // Show offline overlay
     const overlay = el('stream-offline-overlay');
     if (overlay) overlay.classList.add('visible');
@@ -1113,7 +1123,13 @@ window.onload = () => {
     const savedTheme = localStorage.getItem('esp32cam_theme');
     if (savedTheme === 'light') document.body.classList.add('light-theme');
 
-    el('stream').src = '/stream?t=' + Date.now();
+    // Restore auto-reconnect preference
+    const savedAutoReconnect = localStorage.getItem('esp32cam_autoreconnect');
+    if (savedAutoReconnect === '0' && el('chk-autoreconnect')) {
+        el('chk-autoreconnect').checked = false;
+    }
+
+    el('stream').src = "http://" + window.location.hostname + ":81/?t=" + Date.now();
     updateStatus();
     updateWifi();
     updateSystemInfo();
@@ -1344,29 +1360,6 @@ function closeShortcutsHelp() {
     el('shortcuts-modal').style.display = 'none';
 }
 
-// ==================== 3. PICTURE-IN-PICTURE ====================
-async function togglePiP() {
-    const video = el('stream');
-
-    try {
-        if (document.pictureInPictureElement) {
-            await document.exitPictureInPicture();
-            showToast('PiP disabled');
-        } else {
-            // Create video element from image stream
-            const videoEl = document.createElement('video');
-            videoEl.src = video.src;
-            videoEl.autoplay = true;
-            videoEl.muted = true;
-
-            await videoEl.requestPictureInPicture();
-            showToast('PiP enabled');
-        }
-    } catch (err) {
-        console.error('PiP failed:', err);
-        showToast('PiP not supported');
-    }
-}
 
 // ==================== 4. VIDEO FILTERS ====================
 const videoFilters = {
@@ -1805,11 +1798,30 @@ const objectDetection = {
 
     async init() {
         if (this.model) return; // Already loaded
+        if (this.isLoading) return;
 
         this.isLoading = true;
-        showToast('Loading AI model...');
+        showToast('Loading AI model (requires internet)...');
 
         try {
+            // Dynamically load TF.js + COCO-SSD from CDN if not already present
+            if (typeof cocoSsd === 'undefined') {
+                await new Promise((resolve, reject) => {
+                    // Load TF.js first, then COCO-SSD
+                    const tfScript = document.createElement('script');
+                    tfScript.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js';
+                    tfScript.onload = () => {
+                        const ssdScript = document.createElement('script');
+                        ssdScript.src = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js';
+                        ssdScript.onload = resolve;
+                        ssdScript.onerror = () => reject(new Error('Failed to load COCO-SSD (no internet?)'));
+                        document.head.appendChild(ssdScript);
+                    };
+                    tfScript.onerror = () => reject(new Error('Failed to load TensorFlow.js (no internet?)'));
+                    document.head.appendChild(tfScript);
+                });
+            }
+
             // Load COCO-SSD model
             this.model = await cocoSsd.load();
             showToast('AI model loaded! Press D to enable detection');
@@ -1819,10 +1831,11 @@ const objectDetection = {
             this.createOverlay();
         } catch (err) {
             console.error('Failed to load model:', err);
-            showToast('AI model failed to load');
+            showToast('AI model unavailable: ' + (err.message || 'No internet access'), 'warning');
             this.isLoading = false;
         }
     },
+
 
     createOverlay() {
         const container = el('vcont');

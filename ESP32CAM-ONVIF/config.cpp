@@ -21,7 +21,7 @@ void fatalError(const char *msg) {
 
 // --- Persistence Implementation ---
 #include <ArduinoJson.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 
 AppSettings appSettings;
 
@@ -70,12 +70,12 @@ void loadSettings() {
           sizeof(appSettings.ntpServer) - 1);
   strncpy(appSettings.timeZone, "UTC0", sizeof(appSettings.timeZone) - 1);
 
-  if (!SPIFFS.exists(SETTINGS_FILE)) {
+  if (!LittleFS.exists(SETTINGS_FILE)) {
     Serial.println("[INFO] No settings file found, using defaults.");
     return;
   }
 
-  File file = SPIFFS.open(SETTINGS_FILE, "r");
+  File file = LittleFS.open(SETTINGS_FILE, "r");
   if (!file) {
     Serial.println("[ERROR] Failed to open settings file");
     return;
@@ -183,7 +183,7 @@ void saveSettings() {
   doc["ntp"] = (const char *)appSettings.ntpServer;
   doc["tz"] = (const char *)appSettings.timeZone;
 
-  File file = SPIFFS.open(SETTINGS_FILE, "w");
+  File file = LittleFS.open(SETTINGS_FILE, "w");
   if (!file) {
     Serial.println("[ERROR] Failed to write settings file");
     return;

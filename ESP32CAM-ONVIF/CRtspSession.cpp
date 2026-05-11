@@ -3,7 +3,7 @@
 #include <time.h>
 #include "esp_camera.h"
 
-// Shared RTSP response buffers — single-threaded, no concurrency risk.
+// Shared RTSP response buffers - single-threaded, no concurrency risk.
 static char s_RtspResponse[1024];
 static char s_RtspSDP[1024];
 static char s_RtspURL[256];

@@ -1,6 +1,6 @@
 #include "wifi_manager.h"
 #include <ArduinoJson.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include "config.h"
 #include "status_led.h"
 #include "onvif_server.h"
@@ -232,7 +232,7 @@ bool WiFiManager::saveCredentials(const String& ssid, const String& password) {
   doc["ssid"] = ssid;
   doc["password"] = password;
   
-  File file = SPIFFS.open(_credentialsFile, "w");
+  File file = LittleFS.open(_credentialsFile, "w");
   if (!file) {
     Serial.println("[ERROR] Failed to open credentials file for writing");
     return false;
@@ -252,12 +252,12 @@ bool WiFiManager::saveCredentials(const String& ssid, const String& password) {
 WiFiCredentials WiFiManager::loadCredentials() {
   WiFiCredentials creds;
   
-  if (!SPIFFS.exists(_credentialsFile)) {
+  if (!LittleFS.exists(_credentialsFile)) {
     Serial.println("[INFO] Credentials file does not exist");
     return creds; // Return empty credentials
   }
   
-  File file = SPIFFS.open(_credentialsFile, "r");
+  File file = LittleFS.open(_credentialsFile, "r");
   if (!file) {
     Serial.println("[ERROR] Failed to open credentials file for reading");
     return creds;

@@ -179,8 +179,9 @@ void onvif_http_task(void *pvParameters) {
     esp_task_wdt_add(NULL);
     while (1) {
         esp_task_wdt_reset();
-        web_config_loop();    // Web UI
-        onvif_server_loop();  // Discovery/SOAP
+        web_config_loop();        // Web UI (Port 80)
+        web_config_stream_loop(); // Web Stream (Port 81)
+        onvif_server_loop();      // Discovery/SOAP
         vTaskDelay(pdMS_TO_TICKS(20)); // Web tasks can sleep a bit longer
     }
 }
