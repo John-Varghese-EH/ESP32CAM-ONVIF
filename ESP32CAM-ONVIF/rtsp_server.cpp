@@ -46,32 +46,33 @@ static void getH264Resolution(uint16_t &width, uint16_t &height) {
 
 void rtsp_server_start() {
     #ifdef VIDEO_CODEC_H264
-        Serial.println("[INFO] Creating H.264 streamer...");
+        LOG_I("Creating H.264 streamer...");
         H264Streamer *h264 = new H264Streamer();
         uint16_t width, height;
         getH264Resolution(width, height);
 
         if (!h264->init(width, height)) {
-            Serial.println("[ERROR] H.264 encoder init failed! Falling back to MJPEG.");
+            LOG_E("H.264 encoder init failed! Falling back to MJPEG.");
             delete h264;
+            if (streamer) delete streamer;
             streamer = new MyStreamer();
             s_h264Active = false;
         } else {
+            if (streamer) delete streamer;
             streamer = h264;
             s_h264Active = true;
         }
-        Serial.printf("[INFO] RTSP server started at %s (%s)\n",
-                      getRTSPUrl().c_str(), s_h264Active ? getCodecName() : "MJPEG (fallback)");
+        LOG_I("RTSP server started at " + getRTSPUrl() + (s_h264Active ? " (" + String(getCodecName()) + ")" : " (MJPEG fallback)"));
     #else
-        Serial.println("[INFO] Creating MJPEG streamer...");
-        streamer = new MyStreamer();
-        Serial.println("[INFO] RTSP server started at " + getRTSPUrl());
+        LOG_I("Creating MJPEG streamer...");
+        if (!streamer) streamer = new MyStreamer();
+        LOG_I("RTSP server started at " + getRTSPUrl());
     #endif
 
     rtspServer.begin();
 
     #ifdef BOARD_NAME
-        Serial.printf("[INFO] Board: %s, Codec: %s\n", BOARD_NAME, getCodecName());
+        LOG_I("Board: " + String(BOARD_NAME) + ", Codec: " + String(getCodecName()));
     #endif
 }
 
@@ -81,12 +82,12 @@ void rtsp_server_loop() {
     if (client) {
         // Guard 1: Only one RTSP session at a time
         if (session) {
-            Serial.println("[WARN] RTSP Client rejected: session already active");
+            LOG_I("RTSP Client rejected: session already active");
             client.stop();
         }
         // Guard 2: Reject if heap is dangerously low
         else if (ESP.getFreeHeap() < MIN_HEAP_FOR_CLIENT) {
-            Serial.printf("[WARN] RTSP Client rejected: low heap (%u bytes)\n", ESP.getFreeHeap());
+            LOG_I("RTSP Client rejected: low heap (" + String(ESP.getFreeHeap()) + " bytes)");
             client.stop();
         }
         else {
@@ -95,14 +96,14 @@ void rtsp_server_loop() {
 
             // Ensure streamer exists
             if (!streamer) {
-                Serial.println("[ERROR] Streamer is NULL! Re-initializing...");
+                LOG_E("Streamer is NULL! Re-initializing...");
                 #ifdef VIDEO_CODEC_H264
                     if (s_h264Active) {
                         uint16_t width, height;
                         getH264Resolution(width, height);
                         H264Streamer *h264 = new H264Streamer();
                         if (!h264->init(width, height)) {
-                            Serial.println("[ERROR] H.264 reinit failed. Using MJPEG.");
+                            LOG_E("H.264 reinit failed. Using MJPEG.");
                             delete h264;
                             streamer = new MyStreamer();
                             s_h264Active = false;
@@ -120,8 +121,7 @@ void rtsp_server_loop() {
             if (streamer) {
                 streamer->setClientSocket(clientPtr);
                 session = new CRtspSession(clientPtr, streamer);
-                Serial.printf("[INFO] RTSP Client Connected (%s, heap: %u)\n",
-                              getCodecName(), ESP.getFreeHeap());
+                LOG_I("RTSP Client Connected (" + String(getCodecName()) + ", heap: " + String(ESP.getFreeHeap()) + ")");
 
                 #ifdef VIDEO_CODEC_H264
                     if (s_h264Active) {
@@ -129,7 +129,7 @@ void rtsp_server_loop() {
                     }
                 #endif
             } else {
-                Serial.println("[FATAL] Streamer init failed. Closing client.");
+                LOG_E("Streamer init failed. Closing client.");
                 clientPtr->stop();
                 delete clientPtr;
             }
@@ -159,7 +159,7 @@ void rtsp_server_loop() {
 
         // Teardown on disconnect
         if (session->m_stopped) {
-            Serial.printf("[INFO] RTSP client disconnected (heap: %u)\n", ESP.getFreeHeap());
+            LOG_I("RTSP client disconnected (heap: " + String(ESP.getFreeHeap()) + ")");
             delete session;
             session = nullptr;
         }

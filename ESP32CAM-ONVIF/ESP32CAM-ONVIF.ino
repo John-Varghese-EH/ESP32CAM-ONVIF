@@ -36,6 +36,7 @@ Preferences preferences;
 // Task Handles
 TaskHandle_t rtspTaskHandle = NULL;
 TaskHandle_t onvifTaskHandle = NULL;
+TaskHandle_t webStreamTaskHandle = NULL;
 TaskHandle_t wifiTaskHandle = NULL;
 TaskHandle_t wdtTaskHandle = NULL;
 TaskHandle_t lowPrioTaskHandle = NULL;
@@ -43,6 +44,7 @@ TaskHandle_t lowPrioTaskHandle = NULL;
 // Task Declarations
 void rtsp_stream_task(void *pvParameters);
 void onvif_http_task(void *pvParameters);
+void web_stream_task(void *pvParameters);
 void wifi_mgmt_task(void *pvParameters);
 void watchdog_task(void *pvParameters);
 void low_prio_task(void *pvParameters);
@@ -152,6 +154,7 @@ void setup() {
   // --- Create FreeRTOS Tasks ---
   xTaskCreatePinnedToCore(rtsp_stream_task, "RTSP_Task", 6144, NULL, 4, &rtspTaskHandle, 0);
   xTaskCreatePinnedToCore(onvif_http_task, "ONVIF_HTTP_Task", 6144, NULL, 3, &onvifTaskHandle, 1);
+  xTaskCreatePinnedToCore(web_stream_task, "Web_Stream_Task", 4096, NULL, 2, &webStreamTaskHandle, 1);
   xTaskCreatePinnedToCore(wifi_mgmt_task, "WiFi_Mgmt_Task", 4096, NULL, 6, &wifiTaskHandle, 1);
   xTaskCreatePinnedToCore(watchdog_task, "WDT_Task", 2048, NULL, 7, &wdtTaskHandle, 1);
   xTaskCreatePinnedToCore(low_prio_task, "Low_Prio_Task", 4096, NULL, 2, &lowPrioTaskHandle, 1);
@@ -180,9 +183,17 @@ void onvif_http_task(void *pvParameters) {
     while (1) {
         esp_task_wdt_reset();
         web_config_loop();        // Web UI (Port 80)
-        web_config_stream_loop(); // Web Stream (Port 81)
         onvif_server_loop();      // Discovery/SOAP
         vTaskDelay(pdMS_TO_TICKS(20)); // Web tasks can sleep a bit longer
+    }
+}
+
+void web_stream_task(void *pvParameters) {
+    esp_task_wdt_add(NULL);
+    while (1) {
+        esp_task_wdt_reset();
+        web_config_stream_loop(); // Web Stream (Port 81)
+        vTaskDelay(pdMS_TO_TICKS(5)); // High frequency for streaming
     }
 }
 
@@ -227,6 +238,7 @@ void watchdog_task(void *pvParameters) {
             
             if(rtspTaskHandle) { hwm = uxTaskGetStackHighWaterMark(rtspTaskHandle); Serial.printf("[INFO] RTSP_Task HWM: %u bytes\n", hwm * sizeof(StackType_t)); }
             if(onvifTaskHandle) { hwm = uxTaskGetStackHighWaterMark(onvifTaskHandle); Serial.printf("[INFO] ONVIF_Task HWM: %u bytes\n", hwm * sizeof(StackType_t)); }
+            if(webStreamTaskHandle) { hwm = uxTaskGetStackHighWaterMark(webStreamTaskHandle); Serial.printf("[INFO] WebStream_Task HWM: %u bytes\n", hwm * sizeof(StackType_t)); }
             if(wifiTaskHandle) { hwm = uxTaskGetStackHighWaterMark(wifiTaskHandle); Serial.printf("[INFO] WiFi_Task HWM: %u bytes\n", hwm * sizeof(StackType_t)); }
             if(mqttTaskHandle) { hwm = uxTaskGetStackHighWaterMark(mqttTaskHandle); Serial.printf("[INFO] MQTT_Task HWM: %u bytes\n", hwm * sizeof(StackType_t)); }
         }

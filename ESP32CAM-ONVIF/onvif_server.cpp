@@ -9,7 +9,6 @@
 #include "mbedtls/base64.h"
 #include "mbedtls/sha1.h"
 #include "onvif_server.h"
-#include "rtsp_server.h"
 #include <WebServer.h>
 #include <WiFiUdp.h>
 #include <time.h>
@@ -52,26 +51,20 @@ const char TPL_CAPABILITIES[] PROGMEM =
     "tt:SystemBackup><tt:FirmwareUpgrade>false</"
     "tt:FirmwareUpgrade><tt:SupportedVersions><tt:Major>2</"
     "tt:Major><tt:Minor>5</tt:Minor></tt:SupportedVersions></tt:System>"
-    "<tt:Security><tt:TLS1.0>false</tt:TLS1.0><tt:TLS1.1>false</"
-    "tt:TLS1.1><tt:TLS1.2>false</tt:TLS1.2><tt:OnboardKeyGeneration>false</"
-    "tt:OnboardKeyGeneration><tt:AccessPolicyConfig>false</"
-    "tt:AccessPolicyConfig><tt:DefaultAccessPolicy>false</"
-    "tt:DefaultAccessPolicy><tt:Dot1X>false</"
-    "tt:Dot1X><tt:RemoteUserHandling>false</"
-    "tt:RemoteUserHandling><tt:X.509Token>false</"
-    "tt:X.509Token><tt:SAMLToken>false</tt:SAMLToken><tt:KerberosToken>false</"
-    "tt:KerberosToken><tt:UsernameToken>true</"
-    "tt:UsernameToken><tt:HttpDigest>false</tt:HttpDigest><tt:RELToken>false</"
-    "tt:RELToken></tt:Security>"
     "</tt:Device>"
     "<tt:Media>"
     "<tt:XAddr>http://%s:%d/onvif/device_service</tt:XAddr>"
-    "<tt:StreamingCapabilities><tt:RTPMulticast>false</"
-    "tt:RTPMulticast><tt:RTP_TCP>true</tt:RTP_TCP><tt:RTP_RTSP_TCP>true</"
-    "tt:RTP_RTSP_TCP></tt:StreamingCapabilities>"
+    "<tt:StreamingCapabilities>"
+    "<tt:RTPMulticast>false</tt:RTPMulticast>"
+    "<tt:RTP_TCP>true</tt:RTP_TCP>"
+    "<tt:RTP_RTSP_TCP>true</tt:RTP_RTSP_TCP>"
+    "</tt:StreamingCapabilities>"
     "</tt:Media>"
-    "<tt:Imaging><tt:XAddr>http://%s:%d/onvif/device_service</tt:XAddr></"
-    "tt:Imaging>"
+    "<tt:Events>"
+    "<tt:XAddr>http://%s:%d/onvif/device_service</tt:XAddr>"
+    "<tt:WSSubscriptionPolicySupport>false</tt:WSSubscriptionPolicySupport>"
+    "<tt:WSPullPointSupport>false</tt:WSPullPointSupport>"
+    "</tt:Events>"
     "</tds:Capabilities>"
     "</tds:GetCapabilitiesResponse>"
     "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
@@ -206,78 +199,80 @@ String base64_encode(const uint8_t *data, size_t length) {
 // Helper function to find XML element value regardless of namespace prefix
 // Handles: <wsse:Username>, <Username>, <ns1:Username>, etc.
 // FIXED: Avoid creating String objects in loops to prevent heap fragmentation
-int findXmlElementStart(const String &xml, const char *elementName,
-                        int searchFrom) {
-  // Common namespace prefixes - use static const char* to avoid dynamic
-  // allocation
-  static const char *prefixes[] = {"wsse:", "wsu:", "", "ns1:", "ns2:", "sec:"};
-  static const int prefixCount = 6;
-
-  // Build search tag in stack buffer
-  char tag[64];
+int findXmlElementStart(const String &xml, const char *elementName, int searchFrom) {
   size_t elemLen = strlen(elementName);
+  int searchPos = searchFrom;
 
-  for (int i = 0; i < prefixCount; i++) {
-    size_t prefixLen = strlen(prefixes[i]);
-    if (prefixLen + elemLen + 1 >= sizeof(tag))
-      continue; // Skip if too long
+  while (true) {
+    int idx = xml.indexOf(elementName, searchPos);
+    if (idx < 1) break; // Need at least '<' before it
 
-    // Build "<prefix:element" pattern
-    tag[0] = '<';
-    strcpy(tag + 1, prefixes[i]);
-    strcpy(tag + 1 + prefixLen, elementName);
-
-    int searchPos = searchFrom;
-    while (true) {
-      int idx = xml.indexOf(tag, searchPos);
-      if (idx < 0)
-        break;
-
-      // Verify the character after the element name is a valid tag terminator
-      // (not a letter), to avoid matching e.g. <UsernameToken when seeking
-      // <Username
-      int afterElem = idx + 1 + (int)prefixLen + (int)elemLen;
-      char nextChar =
-          (afterElem < (int)xml.length()) ? xml[afterElem] : '\0';
-      if (nextChar == '>' || nextChar == ' ' || nextChar == '/' ||
-          nextChar == '\t' || nextChar == '\r' || nextChar == '\n') {
-        // Valid element found; find the closing > of the opening tag
-        int closeTag = xml.indexOf(">", idx);
-        if (closeTag >= 0 && closeTag + 1 <= (int)xml.length()) {
-          return closeTag + 1; // Return position after >
+    // Check if it's a tag start: <element or <prefix:element
+    bool isValid = false;
+    if (xml[idx - 1] == '<') {
+      isValid = true;
+    } else if (xml[idx - 1] == ':') {
+      // Find the '<' before the prefix
+      int tagStart = xml.lastIndexOf('<', idx - 1);
+      if (tagStart >= 0) {
+        // Ensure no spaces between < and :
+        isValid = true;
+        for (int j = tagStart + 1; j < idx - 1; j++) {
+          if (isspace(xml[j]) || xml[j] == '<' || xml[j] == '>') {
+            isValid = false;
+            break;
+          }
         }
       }
-      // Partial match (e.g. <UsernameToken); skip past it and keep searching
-      searchPos = idx + 1;
     }
+
+    if (isValid) {
+      // Verify character after element name is a tag terminator
+      int afterElem = idx + (int)elemLen;
+      char nextChar = (afterElem < (int)xml.length()) ? xml[afterElem] : '\0';
+      if (nextChar == '>' || isspace(nextChar) || nextChar == '/' || nextChar == '\0') {
+        int closeTag = xml.indexOf('>', idx);
+        if (closeTag >= 0) return closeTag + 1;
+      }
+    }
+    searchPos = idx + 1;
   }
   return -1;
 }
 
-int findXmlElementEnd(const String &xml, const char *elementName,
-                      int searchFrom) {
-  static const char *prefixes[] = {"wsse:", "wsu:", "", "ns1:", "ns2:", "sec:"};
-  static const int prefixCount = 6;
-
-  char tag[64];
+int findXmlElementEnd(const String &xml, const char *elementName, int searchFrom) {
   size_t elemLen = strlen(elementName);
+  int searchPos = searchFrom;
 
-  for (int i = 0; i < prefixCount; i++) {
-    size_t prefixLen = strlen(prefixes[i]);
-    if (prefixLen + elemLen + 3 >= sizeof(tag))
-      continue;
+  while (true) {
+    int idx = xml.indexOf(elementName, searchPos);
+    if (idx < 2) break; // Need at least '</' before it
 
-    // Build "</prefix:element>" pattern
-    tag[0] = '<';
-    tag[1] = '/';
-    strcpy(tag + 2, prefixes[i]);
-    strcpy(tag + 2 + prefixLen, elementName);
-    strcat(tag, ">");
-
-    int idx = xml.indexOf(tag, searchFrom);
-    if (idx >= 0) {
-      return idx;
+    // Check for </element or </prefix:element
+    bool isValid = false;
+    if (xml[idx - 1] == '/' && xml[idx - 2] == '<') {
+      isValid = true;
+    } else if (xml[idx - 1] == ':') {
+      int tagStart = xml.lastIndexOf("</", idx - 1);
+      if (tagStart >= 0) {
+        isValid = true;
+        for (int j = tagStart + 2; j < idx - 1; j++) {
+          if (isspace(xml[j]) || xml[j] == '<' || xml[j] == '>') {
+            isValid = false;
+            break;
+          }
+        }
+      }
     }
+
+    if (isValid) {
+      int afterElem = idx + (int)elemLen;
+      char nextChar = (afterElem < (int)xml.length()) ? xml[afterElem] : '\0';
+      if (nextChar == '>' || isspace(nextChar) || nextChar == '\0') {
+        return idx - (xml[idx - 1] == ':' ? (idx - xml.lastIndexOf('<', idx)) : 2);
+      }
+    }
+    searchPos = idx + 1;
   }
   return -1;
 }
@@ -309,9 +304,9 @@ bool verify_soap_header(String &soapReq) {
   if (DEBUG_LEVEL >= 3) {
     int usernamePos = soapReq.indexOf("Username", secIdx);
     int passwordPos = soapReq.indexOf("Password", secIdx);
-    Serial.printf(
-        "[DEBUG] Security header at %d, Username at %d, Password at %d\n",
-        secIdx, usernamePos, passwordPos);
+    LOG_D("Auth: Security header at " + String(secIdx) + 
+          ", Username at " + String(usernamePos) + 
+          ", Password at " + String(passwordPos));
   }
 
   // 2. Extract Username (handles wsse:Username, Username, etc.)
@@ -348,14 +343,14 @@ bool verify_soap_header(String &soapReq) {
     return false;
   }
 
-  // Debug output for troubleshooting (only in verbose mode)
+  // Debug output for troubleshooting
   if (DEBUG_LEVEL >= 3) {
-    Serial.println("[DEBUG] Auth components:");
-    Serial.println("  User: '" + username + "'");
-    Serial.println("  Nonce: '" + nonceBase64 + "'");
-    Serial.println("  Created: '" + created + "'");
-    Serial.println("  Password (config): '" + String(WEB_PASS) + "'");
-    Serial.println("  Digest (received): '" + digestBase64 + "'");
+    LOG_D("Auth components:");
+    LOG_D("  User: '" + username + "'");
+    LOG_D("  Nonce: '" + nonceBase64 + "'");
+    LOG_D("  Created: '" + created + "'");
+    LOG_D("  Password (config): '" + String(WEB_PASS) + "'");
+    LOG_D("  Digest (received): '" + digestBase64 + "'");
   }
 
   // 6. Verify Digest = Base64(SHA1(Base64Decode(Nonce) + Created + Password))
@@ -825,67 +820,16 @@ const char PROGMEM TPL_NETWORK_INTERFACES[] =
 
 void handle_GetCapabilities() {
   String ip = WiFi.localIP().toString();
-
   LOG_D("Sending GetCapabilities response");
-
-  // Build complete response first for better reliability
-  char buffer[1500];
-  int len = snprintf(
-      buffer, sizeof(buffer),
-      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-      "<SOAP-ENV:Envelope "
-      "xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\" "
-      "xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\" "
-      "xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
-      "<SOAP-ENV:Body>"
-      "<tds:GetCapabilitiesResponse>"
-      "<tds:Capabilities>"
-      "<tt:Device>"
-      "<tt:XAddr>http://%s:%d/onvif/device_service</tt:XAddr>"
-      "<tt:Network>"
-      "<tt:IPFilter>false</tt:IPFilter>"
-      "<tt:ZeroConfiguration>false</tt:ZeroConfiguration>"
-      "<tt:IPVersion6>false</tt:IPVersion6>"
-      "<tt:DynDNS>false</tt:DynDNS>"
-      "</tt:Network>"
-      "<tt:System>"
-      "<tt:DiscoveryResolve>false</tt:DiscoveryResolve>"
-      "<tt:DiscoveryBye>false</tt:DiscoveryBye>"
-      "<tt:RemoteDiscovery>false</tt:RemoteDiscovery>"
-      "<tt:SystemBackup>false</tt:SystemBackup>"
-      "<tt:FirmwareUpgrade>false</tt:FirmwareUpgrade>"
-      "<tt:SupportedVersions>"
-      "<tt:Major>2</tt:Major>"
-      "<tt:Minor>5</tt:Minor>"
-      "</tt:SupportedVersions>"
-      "</tt:System>"
-      "</tt:Device>"
-      "<tt:Media>"
-      "<tt:XAddr>http://%s:%d/onvif/device_service</tt:XAddr>"
-      "<tt:StreamingCapabilities>"
-      "<tt:RTPMulticast>false</tt:RTPMulticast>"
-      "<tt:RTP_TCP>true</tt:RTP_TCP>"
-      "<tt:RTP_RTSP_TCP>true</tt:RTP_RTSP_TCP>"
-      "</tt:StreamingCapabilities>"
-      "</tt:Media>"
-      "<tt:Events>"
-      "<tt:XAddr>http://%s:%d/onvif/device_service</tt:XAddr>"
-      "<tt:WSSubscriptionPolicySupport>false</tt:WSSubscriptionPolicySupport>"
-      "<tt:WSPullPointSupport>false</tt:WSPullPointSupport>"
-      "</tt:Events>"
-      "</tds:Capabilities>"
-      "</tds:GetCapabilitiesResponse>"
-      "</SOAP-ENV:Body>"
-      "</SOAP-ENV:Envelope>",
-      ip.c_str(), ONVIF_PORT, ip.c_str(), ONVIF_PORT, ip.c_str(), ONVIF_PORT);
-
-  if (len > 0 && len < sizeof(buffer)) {
-    onvifServer.send(200, "application/soap+xml", buffer);
-    LOG_D("GetCapabilities sent, size: " + String(len));
-  } else {
-    LOG_E("GetCapabilities buffer overflow!");
-    onvifServer.send(500, "text/plain", "Buffer overflow");
-  }
+  
+  if (!s_soapBuf) return;
+  snprintf_P(s_soapBuf, SOAP_BUF_SIZE, PART_HEADER);
+  size_t len = strlen(s_soapBuf);
+  snprintf_P(s_soapBuf + len, SOAP_BUF_SIZE - len, TPL_CAPABILITIES, 
+             ip.c_str(), ONVIF_PORT, ip.c_str(), ONVIF_PORT, ip.c_str(), ONVIF_PORT);
+  
+  onvifServer.send(200, "application/soap+xml", s_soapBuf);
+  if (DEBUG_LEVEL >= 3) LOG_D(s_soapBuf);
 }
 
 void handle_GetStreamUri() {
@@ -915,21 +859,20 @@ void handle_GetSystemDateAndTime() {
 
   const char* dst_str = (DAYLIGHT_OFFSET > 0) ? "true" : "false";
 
-  char *buffer = new char[1024];
-  if (buffer) {
-    snprintf_P(buffer, 1024, PART_HEADER);
-    size_t len = strlen(buffer);
-    // Note: tm_year is years since 1900, tm_mon is 0-11
-    snprintf_P(buffer + len, 1024 - len, TPL_TIME_FMT, 
-               dst_str, tz_str,
-               timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
-               timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday);
-
-    onvifServer.send(200, "application/soap+xml", buffer);
-    delete[] buffer;
-  } else {
+  if (!s_soapBuf) {
     onvifServer.send(500, "text/plain", "OOM");
+    return;
   }
+
+  snprintf_P(s_soapBuf, SOAP_BUF_SIZE, PART_HEADER);
+  size_t len = strlen(s_soapBuf);
+  // Note: tm_year is years since 1900, tm_mon is 0-11
+  snprintf_P(s_soapBuf + len, SOAP_BUF_SIZE - len, TPL_TIME_FMT, 
+             dst_str, tz_str,
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
+             timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday);
+
+  onvifServer.send(200, "application/soap+xml", s_soapBuf);
 }
 
 // Simple parser for SetImagingSettings
@@ -1112,6 +1055,10 @@ void handle_onvif_soap() {
   // Public action without auth - allow through
 
   LOG_I("ONVIF: " + action);
+  if (DEBUG_LEVEL >= 3) {
+    LOG_D("SOAP Request Body:");
+    LOG_D(req);
+  }
 
   // Handle unknown actions with debug output
   if (action == "Unknown") {
@@ -1150,6 +1097,7 @@ void handle_onvif_soap() {
 
     sendDynamicPROGMEM(onvifServer, TPL_SNAPSHOT_URI,
                        WiFi.localIP().toString().c_str(), WEB_PORT);
+    LOG_D("GetSnapshotUri response sent");
   } else if (req.indexOf("GetDeviceInformation") > 0) {
     // Dynamically insert MAC address as Serial Number for better NVR
     // compatibility
@@ -1167,7 +1115,8 @@ void handle_onvif_soap() {
     snprintf_P(
         buffer, sizeof(buffer),
         PSTR("%s"
-             "xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\">"
+             "xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\" "
+             "xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
              "<SOAP-ENV:Body>"
              "<tds:GetServicesResponse>"
              "<tds:Service><tds:Namespace>http://www.onvif.org/ver10/device/"
@@ -1188,7 +1137,7 @@ void handle_onvif_soap() {
              "</SOAP-ENV:Body></SOAP-ENV:Envelope>"),
         ip.c_str(), ONVIF_PORT);
     onvifServer.sendContent(buffer);
-
+    if (DEBUG_LEVEL >= 3) LOG_D(buffer);
   } else if (req.indexOf("GetProfiles") > 0) {
     LOG_D("Sending GetProfiles response");
 
@@ -1257,6 +1206,7 @@ void handle_onvif_soap() {
     if (len > 0 && len < sizeof(buffer)) {
       onvifServer.send(200, "application/soap+xml", buffer);
       LOG_D("GetProfiles sent, size: " + String(len));
+      if (DEBUG_LEVEL >= 3) LOG_D(buffer);
     } else {
       LOG_E("GetProfiles buffer overflow!");
       onvifServer.send(500, "text/plain", "Buffer overflow");
@@ -1274,16 +1224,10 @@ void handle_onvif_soap() {
     // Saturation
     int sa = (s->status.saturation + 2) * 25;
 
-    char *buffer = new char[2048];
-    if (buffer) {
-      snprintf_P(buffer, 2048, PART_HEADER);
-      size_t len = strlen(buffer);
-      snprintf_P(buffer + len, 2048 - len, TPL_VIDEO_SOURCES, br, sa, cn);
-      onvifServer.send(200, "application/soap+xml", buffer);
-      delete[] buffer;
-    } else {
-      onvifServer.send(500, "text/plain", "OOM");
-    }
+    snprintf_P(s_soapBuf, SOAP_BUF_SIZE, PART_HEADER);
+    size_t len = strlen(s_soapBuf);
+    snprintf_P(s_soapBuf + len, SOAP_BUF_SIZE - len, TPL_VIDEO_SOURCES, br, sa, cn);
+    onvifServer.send(200, "application/soap+xml", s_soapBuf);
   } else if (req.indexOf("GetVideoEncoderConfigurationOptions") > 0) {
     sendFixedPROGMEM(onvifServer, TPL_VIDEO_OPTIONS);
   } else if (req.indexOf("GetVideoEncoderConfiguration") > 0) {
@@ -1295,17 +1239,11 @@ void handle_onvif_soap() {
     }
   } else if (req.indexOf("GetNetworkInterfaces") > 0) {
     // Pass MAC and IP to the template
-    char *buffer = new char[2048];
-    if (buffer) {
-      snprintf_P(buffer, 2048, PART_HEADER);
-      size_t len = strlen(buffer);
-      snprintf_P(buffer + len, 2048 - len, TPL_NETWORK_INTERFACES,
-                 WiFi.macAddress().c_str(), WiFi.localIP().toString().c_str());
-      onvifServer.send(200, "application/soap+xml", buffer);
-      delete[] buffer;
-    } else {
-      onvifServer.send(500, "text/plain", "OOM");
-    }
+    snprintf_P(s_soapBuf, SOAP_BUF_SIZE, PART_HEADER);
+    size_t len = strlen(s_soapBuf);
+    snprintf_P(s_soapBuf + len, SOAP_BUF_SIZE - len, TPL_NETWORK_INTERFACES,
+               WiFi.macAddress().c_str(), WiFi.localIP().toString().c_str());
+    onvifServer.send(200, "application/soap+xml", s_soapBuf);
   } else if (req.indexOf("GetAudioEncoderConfigurationOptions") > 0) {
     sendFixedPROGMEM(onvifServer, TPL_AUDIO_OPTIONS); // Return empty options
   } else if (req.indexOf("GetAudioEncoderConfiguration") > 0) {
@@ -1313,8 +1251,6 @@ void handle_onvif_soap() {
     sendFixedPROGMEM(onvifServer, TPL_AUDIO_CONFIG);
   } else if (req.indexOf("GetOSDOptions") > 0) {
     sendFixedPROGMEM(onvifServer, TPL_OSD_OPTIONS);
-  } else if (req.indexOf("GetVideoAnalyticsConfigurations") > 0) {
-    sendFixedPROGMEM(onvifServer, TPL_ANALYTICS_CONFIG);
   } else if (req.indexOf("GetVideoAnalyticsConfigurations") > 0) {
     sendFixedPROGMEM(onvifServer, TPL_ANALYTICS_CONFIG);
   } else if (req.indexOf("GetOptions") > 0 &&
@@ -1350,6 +1286,7 @@ void handle_onvif_soap() {
              req.indexOf("SetVideoEncoderConfiguration") > 0) {
     // Acknowledge setting commands with OK (we ignore the actual values to
     // enforce stability)
+    LOG_D("<ok/>");
     onvifServer.send(200, "application/soap+xml", "<ok/>");
   } else if (req.indexOf("GetDNS") > 0) {
     sendFixedPROGMEM(onvifServer, TPL_DNS);
@@ -1368,8 +1305,10 @@ void handle_onvif_soap() {
   } else if (req.indexOf("AbsoluteMove") > 0 ||
              req.indexOf("ContinuousMove") > 0 || req.indexOf("Stop") > 0) {
     handle_ptz(req);
+    LOG_D("<ok/>");
     onvifServer.send(200, "application/soap+xml", "<ok/>");
   } else {
+    LOG_D("<ok/>");
     onvifServer.send(200, "application/soap+xml", "<ok/>");
   }
 }

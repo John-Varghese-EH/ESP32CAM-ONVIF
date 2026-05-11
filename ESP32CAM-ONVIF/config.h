@@ -223,7 +223,7 @@
 // --- Device Information (shown in DVR/NVR during discovery) ---
 #define DEVICE_MANUFACTURER "John-Varghese-EH"
 #define DEVICE_MODEL "ESP32-CAM-ONVIF"
-#define DEVICE_VERSION "1.3"
+#define DEVICE_VERSION "1.4"
 #define DEVICE_HARDWARE_ID "ESP32CAM-J0X"
 
 // --- OTA Updates ---
