@@ -1,0 +1,279 @@
+mainmenu "ESP32CAM-ONVIF Configuration"
+
+config FIRMWARE_VERSION
+    string "Firmware Version"
+    default "v1.4.0"
+
+menu "Board Selection"
+choice BOARD_TYPE
+    prompt "Select Board"
+    default BOARD_AI_THINKER_ESP32CAM
+
+config BOARD_AI_THINKER_ESP32CAM
+    bool "AI-Thinker ESP32-CAM"
+config BOARD_M5STACK_CAMERA
+    bool "M5Stack Camera"
+config BOARD_M5STACK_PSRAM
+    bool "M5Stack PSRAM"
+config BOARD_M5STACK_WIDE
+    bool "M5Stack Wide"
+config BOARD_M5STACK_UNITCAM
+    bool "M5Stack Unit Cam"
+config BOARD_TTGO_T_CAMERA
+    bool "TTGO T-Camera"
+config BOARD_TTGO_T_JOURNAL
+    bool "TTGO T-Journal"
+config BOARD_WROVER_KIT
+    bool "WROVER Kit"
+config BOARD_ESP_EYE
+    bool "ESP-EYE"
+config BOARD_FREENOVE_ESP32S3
+    bool "Freenove ESP32-S3"
+config BOARD_SEEED_XIAO_S3
+    bool "Seeed XIAO S3"
+config BOARD_ESP32S3_EYE
+    bool "ESP32-S3-EYE"
+config BOARD_ESP32P4_FUNCTION_EV
+    bool "ESP32-P4-Function-EV"
+config BOARD_ESP32P4_ETH
+    bool "ESP32-P4-ETH"
+config BOARD_CUSTOM
+    bool "Custom Board"
+endchoice
+endmenu
+
+menu "Video Codec Selection"
+choice VIDEO_CODEC
+    prompt "Select Video Codec"
+    default VIDEO_CODEC_MJPEG
+
+config VIDEO_CODEC_MJPEG
+    bool "MJPEG"
+config VIDEO_CODEC_H264
+    bool "H.264"
+endchoice
+
+menu "H.264 Settings"
+    depends on VIDEO_CODEC_H264
+
+choice H264_ENCODER
+    prompt "H.264 Encoder"
+    default H264_ENCODER_AUTO
+
+config H264_ENCODER_AUTO
+    bool "Auto"
+config H264_ENCODER_HARDWARE
+    bool "Hardware"
+config H264_ENCODER_SOFTWARE
+    bool "Software"
+endchoice
+
+config H264_GOP
+    int "H264 GOP"
+    default 30
+config H264_FPS
+    int "H264 FPS"
+    default 25
+config H264_BITRATE
+    int "H264 Bitrate"
+    default 2000000
+config H264_QP_MIN
+    int "H264 QP Min"
+    default 20
+config H264_QP_MAX
+    int "H264 QP Max"
+    default 35
+config H264_SW_MAX_WIDTH
+    int "H264 SW Max Width"
+    default 640
+config H264_SW_MAX_HEIGHT
+    int "H264 SW Max Height"
+    default 480
+endmenu
+endmenu
+
+menu "Network Configuration"
+config WIFI_SSID
+    string "WiFi SSID"
+    default "YOUR_WIFI_SSID"
+config WIFI_PASSWORD
+    string "WiFi Password"
+    default "YOUR_WIFI_PASSWORD"
+config AP_SSID
+    string "AP SSID"
+    default "ESP32CAM-ONVIF"
+config AP_PASSWORD
+    string "AP Password"
+    default "esp32cam"
+
+config STATIC_IP_ENABLED
+    bool "Enable Static IP"
+    default n
+config STATIC_IP_ADDR
+    string "Static IP Address"
+    depends on STATIC_IP_ENABLED
+    default "192, 168, 0, 150"
+config STATIC_GATEWAY
+    string "Static Gateway"
+    depends on STATIC_IP_ENABLED
+    default "192, 168, 0, 1"
+config STATIC_SUBNET
+    string "Static Subnet"
+    depends on STATIC_IP_ENABLED
+    default "255, 255, 255, 0"
+config STATIC_DNS
+    string "Static DNS"
+    depends on STATIC_IP_ENABLED
+    default "8, 8, 8, 8"
+
+config WEB_PORT
+    int "Web Port"
+    default 80
+config RTSP_PORT
+    int "RTSP Port"
+    default 554
+config ONVIF_PORT
+    int "ONVIF Port"
+    default 8000
+endmenu
+
+menu "Security & Authentication"
+config WEB_USER
+    string "Web User"
+    default "admin"
+config WEB_PASS
+    string "Web Password"
+    default "esp123"
+endmenu
+
+menu "Recording & Storage"
+config ENABLE_DAILY_RECORDING
+    bool "Enable Daily Recording"
+    default n
+config RECORD_SEGMENT_SEC
+    int "Record Segment Length (sec)"
+    default 300
+config MAX_DISK_USAGE_PCT
+    int "Max Disk Usage (%)"
+    default 90
+config ENABLE_MOTION_DETECTION
+    bool "Enable Motion Detection"
+    default n
+endmenu
+
+menu "Hardware Features"
+config FLASH_LED_ENABLED
+    bool "Enable Flash LED"
+    default y
+config FLASH_LED_INVERT
+    bool "Invert Flash LED"
+    default n
+config DEFAULT_AUTO_FLASH
+    bool "Default Auto Flash"
+    default y
+config STATUS_LED_ENABLED
+    bool "Enable Status LED"
+    default y
+config STATUS_LED_INVERT
+    bool "Invert Status LED"
+    default y
+
+config PTZ_ENABLED
+    bool "Enable PTZ"
+    default n
+config PTZ_PAN_MIN
+    int "PTZ Pan Min"
+    depends on PTZ_ENABLED
+    default -90
+config PTZ_PAN_MAX
+    int "PTZ Pan Max"
+    depends on PTZ_ENABLED
+    default 90
+config PTZ_TILT_MIN
+    int "PTZ Tilt Min"
+    depends on PTZ_ENABLED
+    default -45
+config PTZ_TILT_MAX
+    int "PTZ Tilt Max"
+    depends on PTZ_ENABLED
+    default 45
+endmenu
+
+menu "Bluetooth & Audio"
+config BLUETOOTH_ENABLED
+    bool "Enable Bluetooth"
+    default n
+endmenu
+
+menu "ONVIF & NVR Settings"
+config DEFAULT_ONVIF_ENABLED
+    bool "Enable ONVIF by Default"
+    default y
+config DEVICE_MANUFACTURER
+    string "Device Manufacturer"
+    default "John-Varghese-EH"
+config DEVICE_MODEL
+    string "Device Model"
+    default "ESP32-CAM-ONVIF"
+config DEVICE_VERSION
+    string "Device Version"
+    default "1.3"
+config DEVICE_HARDWARE_ID
+    string "Device Hardware ID"
+    default "ESP32CAM-J0X"
+config GITHUB_REPO_OWNER
+    string "GitHub Repo Owner"
+    default "John-Varghese-EH"
+config GITHUB_REPO_NAME
+    string "GitHub Repo Name"
+    default "ESP32CAM-ONVIF"
+endmenu
+
+menu "MQTT & Home Assistant"
+config MQTT_ENABLED
+    bool "Enable MQTT"
+    default n
+config MQTT_BROKER
+    string "MQTT Broker"
+    depends on MQTT_ENABLED
+    default "192.168.1.100"
+config MQTT_PORT
+    int "MQTT Port"
+    depends on MQTT_ENABLED
+    default 1883
+config MQTT_USER
+    string "MQTT User"
+    depends on MQTT_ENABLED
+    default "homeassistant"
+config MQTT_PASS
+    string "MQTT Password"
+    depends on MQTT_ENABLED
+    default "secret"
+config MQTT_TOPIC_BASE
+    string "MQTT Topic Base"
+    depends on MQTT_ENABLED
+    default "home/camera/esp32cam"
+config HA_DISCOVERY_PREFIX
+    string "HA Discovery Prefix"
+    depends on MQTT_ENABLED
+    default "homeassistant"
+endmenu
+
+menu "Advanced Settings"
+config NTP_SERVER
+    string "NTP Server"
+    default "pool.ntp.org"
+config GMT_OFFSET_SEC
+    int "GMT Offset (sec)"
+    default 19800
+config DAYLIGHT_OFFSET
+    int "Daylight Offset (sec)"
+    default 0
+config DEBUG_MODE
+    bool "Enable Debug Mode"
+    default y
+config DEBUG_LEVEL
+    int "Debug Level"
+    depends on DEBUG_MODE
+    default 2
+endmenu
