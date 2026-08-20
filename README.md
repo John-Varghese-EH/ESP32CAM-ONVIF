@@ -129,8 +129,9 @@ Edit `ESP32CAM-ONVIF/config.h`:
 
 **Arduino IDE:**
 1. Install ESP32 Board Manager (v2.0.14+)
-2. Select your board (AI Thinker ESP32-CAM, etc.)
-3. Upload!
+2. Install `PubSubClient` and `ArduinoJson` via Library Manager
+3. Select your board (AI Thinker ESP32-CAM, etc.)
+4. Upload!
 
 **PlatformIO (Recommended):**
 ```bash

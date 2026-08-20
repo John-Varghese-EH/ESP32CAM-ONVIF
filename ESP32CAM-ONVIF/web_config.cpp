@@ -345,10 +345,18 @@ void web_config_start() {
             psram_free = ESP.getFreePsram();
         #endif
         
+        // Get current system time formatted
+        time_t now = time(NULL);
+        struct tm timeinfo;
+        gmtime_r(&now, &timeinfo);
+        char timeBuf[32];
+        strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S UTC", &timeinfo);
+        
         // Build JSON with snprintf — zero heap allocations
-        static char infoBuf[512];
+        static char infoBuf[640];
         snprintf(infoBuf, sizeof(infoBuf),
             "{\"rssi\":%d,"
+            "\"system_time\":\"%s\","
             "\"resolution\":\"%s\","
             "\"codec\":\"%s\","
             "\"quality\":%d,"
@@ -360,7 +368,7 @@ void web_config_start() {
             "\"flash_free\":%u,"
             "\"psram_total\":%u,"
             "\"psram_free\":%u}",
-            WiFi.RSSI(), resolution, codec,
+            WiFi.RSSI(), timeBuf, resolution, codec,
             s->status.quality, s->status.brightness,
             s->status.contrast, s->status.saturation,
             flash_size, sketch_size, flash_size - sketch_size,
@@ -1305,6 +1313,10 @@ void web_config_start() {
         if(doc.containsKey("tz")) strncpy(appSettings.timeZone, doc["tz"], sizeof(appSettings.timeZone) - 1);
 
         saveSettings();
+        if (doc.containsKey("ntp") || doc.containsKey("tz")) {
+            configTzTime(appSettings.timeZone, appSettings.ntpServer);
+            Serial.println("[INFO] NTP & Timezone reconfigured via Web API");
+        }
         webConfigServer.send(200, "application/json", "{\"success\":true,\"message\":\"Settings Saved\"}");
     });
 

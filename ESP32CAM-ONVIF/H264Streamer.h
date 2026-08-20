@@ -46,6 +46,9 @@ private:
     // Parse NAL units from encoded frame
     int findNextNALUnit(const uint8_t* data, size_t size, size_t offset);
     
+    // Extract SPS and PPS NAL units from frame
+    void extractSPSPPS(const uint8_t* data, size_t size);
+    
     bool m_initialized;
     h264_encoder_config_t m_config;
     

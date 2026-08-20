@@ -1,6 +1,8 @@
 #include "mqtt_manager.h"
-
 #include <WiFi.h>
+
+#if __has_include(<PubSubClient.h>)
+#define HAS_PUBSUBCLIENT 1
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include "camera_control.h"
@@ -167,3 +169,16 @@ void mqtt_publish_motion(bool motion_detected) {
 bool mqtt_is_connected() {
     return appSettings.mqttEnabled && mqtt_initialized && mqttClient.connected();
 }
+
+#else // !HAS_PUBSUBCLIENT
+
+void init_mqtt() {
+    Serial.println("[MQTT] PubSubClient library missing! Install 'PubSubClient' by Nick O'Leary in Arduino Library Manager for MQTT support.");
+}
+void handle_mqtt() {}
+void publish_ha_discovery() {}
+void publish_status() {}
+void mqtt_publish_motion(bool motion_detected) {}
+bool mqtt_is_connected() { return false; }
+
+#endif // HAS_PUBSUBCLIENT

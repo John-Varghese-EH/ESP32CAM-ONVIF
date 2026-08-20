@@ -5,6 +5,7 @@
 #define PROGMEM
 #endif
 #include "camera_control.h"
+#include "esp_camera.h"
 #include "config.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/sha1.h"
@@ -843,18 +844,19 @@ void handle_GetSystemDateAndTime() {
   time(&now);
   gmtime_r(&now, &timeinfo);
 
-  // Build POSIX timezone string from config.h GMT_OFFSET_SEC
-  // Format: UTC+/-HH:MM (POSIX sign is inverted: UTC-5 = EST5)
-  int offset_sec = GMT_OFFSET_SEC;
-  int offset_hours = offset_sec / 3600;
-  int offset_minutes = abs((offset_sec % 3600) / 60);
-  
   char tz_str[32];
-  if (offset_minutes > 0) {
-    // e.g. IST-5:30 for UTC+5:30, CET-1 for UTC+1
-    snprintf(tz_str, sizeof(tz_str), "UTC%+d:%02d", -offset_hours, offset_minutes);
+  if (strlen(appSettings.timeZone) > 0) {
+    strncpy(tz_str, appSettings.timeZone, sizeof(tz_str) - 1);
+    tz_str[sizeof(tz_str) - 1] = '\0';
   } else {
-    snprintf(tz_str, sizeof(tz_str), "UTC%+d", -offset_hours);
+    int offset_sec = GMT_OFFSET_SEC;
+    int offset_hours = offset_sec / 3600;
+    int offset_minutes = abs((offset_sec % 3600) / 60);
+    if (offset_minutes > 0) {
+      snprintf(tz_str, sizeof(tz_str), "UTC%+d:%02d", -offset_hours, offset_minutes);
+    } else {
+      snprintf(tz_str, sizeof(tz_str), "UTC%+d", -offset_hours);
+    }
   }
 
   const char* dst_str = (DAYLIGHT_OFFSET > 0) ? "true" : "false";
